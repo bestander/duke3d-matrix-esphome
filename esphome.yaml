@@ -36,13 +36,6 @@ hud:
 duke3d:
   id: game_engine
 
-text_sensor:
-  - platform: template
-    id: duke3d_demo
-    name: "Duke3D Current Demo"
-    lambda: return std::string(id(game_engine)->current_demo());
-    update_interval: 10s
-
 sd_card:
   id: sdcard
   mosi_pin: 1   # A0 — verify from schematic
@@ -103,3 +96,8 @@ text_sensor:
     on_value:
       then:
         - lambda: id(hud_display)->set_condition(std::string(x.c_str()));
+  - platform: template
+    id: duke3d_demo
+    name: "Duke3D Current Demo"
+    lambda: return std::string(id(game_engine)->current_demo());
+    update_interval: 10s
