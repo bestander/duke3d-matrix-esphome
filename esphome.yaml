@@ -1,21 +1,6 @@
 esphome:
   name: duke3d-matrix
   friendly_name: Duke3D Matrix
-  on_boot:
-    priority: -200
-    then:
-      - lambda: |-
-          // Temporary test pattern: red/green/blue vertical bands
-          auto* m = id(matrix_display);
-          for (int y = 0; y < 64; y++)
-            for (int x = 0; x < 64; x++) {
-              esphome::hub75_matrix::Color c;
-              if (x < 21) c = {255, 0, 0};
-              else if (x < 42) c = {0, 255, 0};
-              else c = {0, 0, 255};
-              m->set_pixel(x, y, c);
-            }
-          m->swap_buffers();
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -39,10 +24,13 @@ external_components:
   - source:
       type: local
       path: components
-    components: [hub75_matrix]
+    components: [hub75_matrix, hud]
 
 hub75_matrix:
   id: matrix_display
+
+hud:
+  id: hud_display
 
 wifi:
   ssid: !secret wifi_ssid
@@ -68,13 +56,32 @@ logger:
 time:
   - platform: homeassistant
     id: ha_time
+    on_time_sync:
+      then:
+        - lambda: |-
+            auto t = id(ha_time)->now();
+            id(hud_display)->set_time(t.hour, t.minute);
+    # Update clock every second so it actually ticks (on_time_sync fires only once at sync)
+    on_time:
+      - seconds: 0-59    # fires every second
+        then:
+          - lambda: |-
+              auto t = id(ha_time)->now();
+              if (t.is_valid())
+                id(hud_display)->set_time(t.hour, t.minute);
 
 sensor:
   - platform: homeassistant
     id: weather_temperature
     entity_id: sensor.weather_temperature
+    on_value:
+      then:
+        - lambda: id(hud_display)->set_temperature(x);
 
 text_sensor:
   - platform: homeassistant
     id: weather_condition
     entity_id: sensor.weather_condition
+    on_value:
+      then:
+        - lambda: id(hud_display)->set_condition(std::string(x.c_str()));
