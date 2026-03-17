@@ -3,6 +3,7 @@
 #include "../../../hub75_matrix/hub75_matrix.h"
 #include "../../../hud/hud.h"
 #include "../../../sd_card/sd_card.h"
+#include "../../../i2s_audio/i2s_audio.h"
 #include "esp_task_wdt.h"
 
 // global_hud is defined in duke3d_component.cpp and set during Duke3DComponent::setup().
@@ -30,6 +31,8 @@ FILE* platform_open_file(const char* rel_path, const char* mode) {
     return sd->open(rel_path, mode);
 }
 
-void platform_audio_write(const int16_t* /*pcm*/, int /*n*/) {
-    // Stub — implemented in Phase 7 (Task 7)
+void platform_audio_write(const int16_t* pcm, int n) {
+    auto* audio = esphome::i2s_audio::global_i2s;
+    // n is int16_t sample count (both channels). write_pcm expects bytes.
+    if (audio) audio->write_pcm(pcm, n * sizeof(int16_t));
 }

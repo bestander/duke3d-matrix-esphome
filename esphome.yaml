@@ -24,7 +24,7 @@ external_components:
   - source:
       type: local
       path: components
-    components: [hub75_matrix, hud, sd_card, duke3d]
+    components: [hub75_matrix, hud, sd_card, duke3d, i2s_audio]
 
 hub75_matrix:
   id: matrix_display
@@ -35,6 +35,14 @@ hud:
 # Replace A0-A5 pad numbers with actual GPIO numbers from Adafruit Matrix Portal S3 schematic
 duke3d:
   id: game_engine
+
+# I2S pins: A4 and A5 for BCLK/LRCLK; DIN shared with SD MOSI (A0)
+# Ensure SD CS is de-asserted before any I2S write (handled by SPI bus arbitration)
+i2s_audio:
+  id: amp
+  bclk_pin:  5   # A4 — verify from schematic
+  lrclk_pin: 6   # A5 — verify from schematic
+  din_pin:   1   # A0 — shared with SD MOSI, safe when SD CS deasserted
 
 sd_card:
   id: sdcard
