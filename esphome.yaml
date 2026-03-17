@@ -1,6 +1,21 @@
 esphome:
   name: duke3d-matrix
   friendly_name: Duke3D Matrix
+  on_boot:
+    priority: -200
+    then:
+      - lambda: |-
+          // Temporary test pattern: red/green/blue vertical bands
+          auto* m = id(matrix_display);
+          for (int y = 0; y < 64; y++)
+            for (int x = 0; x < 64; x++) {
+              esphome::hub75_matrix::Color c;
+              if (x < 21) c = {255, 0, 0};
+              else if (x < 42) c = {0, 255, 0};
+              else c = {0, 0, 255};
+              m->set_pixel(x, y, c);
+            }
+          m->swap_buffers();
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -19,6 +34,15 @@ esp32:
       CONFIG_FREERTOS_HZ: "1000"
       CONFIG_ESP_MAIN_TASK_STACK_SIZE: "8192"
       CONFIG_ESP_TASK_WDT_TIMEOUT_S: "10"
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [hub75_matrix]
+
+hub75_matrix:
+  id: matrix_display
 
 wifi:
   ssid: !secret wifi_ssid
