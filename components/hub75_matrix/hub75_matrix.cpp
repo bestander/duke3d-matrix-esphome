@@ -47,6 +47,7 @@ void Hub75Matrix::setup() {
     back_buf_ = (Color*)heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
     if (!back_buf_) {
         ESP_LOGE(TAG, "Failed to allocate back buffer in PSRAM");
+        mark_failed();
         return;
     }
     memset(back_buf_, 0, buf_size);
@@ -59,6 +60,9 @@ void Hub75Matrix::setup() {
     matrix_lib = new MatrixPanel_I2S_DMA(cfg);
     if (!matrix_lib->begin()) {
         ESP_LOGE(TAG, "MatrixPanel_I2S_DMA::begin() failed");
+        delete matrix_lib;
+        matrix_lib = nullptr;
+        mark_failed();
         return;
     }
     matrix_lib->setBrightness8(128);
