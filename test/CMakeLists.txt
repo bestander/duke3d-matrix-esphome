@@ -7,6 +7,20 @@ target_include_directories(test_hub75 PRIVATE mock)
 
 add_executable(test_sd_card sd_card/test_grp_detection.cpp)
 
+add_executable(test_renderer
+    renderer/test_downscaler.cpp
+    ${CMAKE_SOURCE_DIR}/../components/duke3d/renderer/renderer.cpp
+)
+target_include_directories(test_renderer PRIVATE
+    mock
+    ${CMAKE_SOURCE_DIR}/../components/duke3d/renderer
+)
+target_compile_definitions(test_renderer PRIVATE DUKE3D_HOST_TEST)
+
+add_executable(test_input input/test_input_queue.cpp)
+
+add_executable(test_i2s_audio i2s_audio/test_write_pcm.cpp)
+
 add_executable(test_hud
     hud/test_hud_layout.cpp
     ${CMAKE_SOURCE_DIR}/../components/hud/hud.cpp
