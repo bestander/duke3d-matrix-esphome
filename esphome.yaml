@@ -24,13 +24,21 @@ external_components:
   - source:
       type: local
       path: components
-    components: [hub75_matrix, hud]
+    components: [hub75_matrix, hud, sd_card]
 
 hub75_matrix:
   id: matrix_display
 
 hud:
   id: hud_display
+
+# Replace A0-A5 pad numbers with actual GPIO numbers from Adafruit Matrix Portal S3 schematic
+sd_card:
+  id: sdcard
+  mosi_pin: 1   # A0 — verify from schematic
+  miso_pin: 2   # A1
+  clk_pin:  3   # A2
+  cs_pin:   4   # A3
 
 wifi:
   ssid: !secret wifi_ssid
