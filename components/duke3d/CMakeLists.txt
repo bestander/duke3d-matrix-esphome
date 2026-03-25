@@ -9,14 +9,12 @@ file(GLOB_RECURSE ENGINE_SRCS
 idf_component_register(
     SRCS
         "duke3d_component.cpp"
-        "renderer/renderer.cpp"
-        "platform/esp32_hal.cpp"
-        "platform/input.cpp"
+        "renderer.cpp"
+        "esp32_hal.cpp"
+        "input.cpp"
         ${ENGINE_SRCS}
     INCLUDE_DIRS
         "."
-        "renderer"
-        "platform"
         "engine/components/Duke3D"
         "engine/components/Duke3D/Engine"
     REQUIRES hub75_matrix hud sd_card i2s_audio freertos esp_task_wdt

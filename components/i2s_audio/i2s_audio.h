@@ -1,6 +1,6 @@
 #pragma once
 #include "esphome/core/component.h"
-#include "driver/i2s_std.h"
+#include "driver/i2s.h"
 #include <cstdint>
 
 namespace esphome {
@@ -22,7 +22,7 @@ public:
 
 private:
     int bclk_ = -1, lrclk_ = -1, din_ = -1;
-    i2s_chan_handle_t tx_handle_ = nullptr;
+    bool initialized_ = false;
 };
 
 extern I2SAudio* global_i2s;

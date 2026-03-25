@@ -35,6 +35,7 @@ private:
 };
 
 extern Hub75Matrix* global_hub75;  // set in setup(); used by duke3d renderer
+extern char hub75_init_status[128]; // human-readable init result for diagnostics
 
 }  // namespace hub75_matrix
 }  // namespace esphome

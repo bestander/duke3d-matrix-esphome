@@ -81,6 +81,10 @@ void Hud::render(MatrixType& d) {
         for (int x = 0; x < 64; x++)
             d.set_pixel(x, y, ColorType(0, 0, 20));
 
+    // TEST: draw solid bright magenta row so display is obviously alive
+    for (int x = 0; x < 64; x++) d.set_pixel(x, HUD_TOP + 0, ColorType(255, 0, 255));
+    for (int x = 0; x < 64; x++) d.set_pixel(x, HUD_TOP + 1, ColorType(255, 0, 255));
+
     // Row 1: weather icon (x=0) + temperature "22 deg C" (x=10)
     draw_icon(d, 0, HUD_TOP, cond);
     char temp_str[8];

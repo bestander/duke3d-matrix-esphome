@@ -1,6 +1,7 @@
 #include "sd_card.h"
 #include "esphome/core/log.h"
 #include "driver/gpio.h"
+#include "sdmmc_cmd.h"
 #include <cstring>
 
 namespace esphome {

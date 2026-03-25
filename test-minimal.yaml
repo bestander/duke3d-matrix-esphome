@@ -1,0 +1,36 @@
+esphome:
+  name: duke3d-matrix
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  framework:
+    type: esp-idf
+    version: "5.2.1"
+    platform_version: "file:///Users/konstantinraev/.platformio/platforms/espressif32"
+    sdkconfig_options:
+      CONFIG_ESPTOOLPY_FLASHSIZE_8MB: "y"
+      CONFIG_ESPTOOLPY_FLASHMODE_QIO: "y"
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [stdout_fix]
+
+stdout_fix:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "duke3d-fallback"
+
+logger:
+  hardware_uart: USB_SERIAL_JTAG
+
+api:
+
+ota:
+  - platform: esphome

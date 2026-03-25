@@ -2,7 +2,7 @@
 #include <cstdint>
 
 #ifndef DUKE3D_HOST_TEST
-#  include "../../../hub75_matrix/hub75_matrix.h"
+#  include "esphome/components/hub75_matrix/hub75_matrix.h"
    using RenderTarget = esphome::hub75_matrix::Hub75Matrix;
 #else
 #  include "hub75_mock.h"

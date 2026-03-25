@@ -1,9 +1,9 @@
 #include "esp32_hal.h"
-#include "../renderer/renderer.h"
-#include "../../../hub75_matrix/hub75_matrix.h"
-#include "../../../hud/hud.h"
-#include "../../../sd_card/sd_card.h"
-#include "../../../i2s_audio/i2s_audio.h"
+#include "renderer.h"
+#include "esphome/components/hub75_matrix/hub75_matrix.h"
+#include "esphome/components/hud/hud.h"
+#include "esphome/components/sd_card/sd_card.h"
+#include "esphome/components/i2s_audio/i2s_audio.h"
 #include "esp_task_wdt.h"
 
 // global_hud is defined in duke3d_component.cpp and set during Duke3DComponent::setup().

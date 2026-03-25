@@ -1,15 +1,24 @@
 #include "duke3d_component.h"
 #include "esphome/core/log.h"
 #include "esp_task_wdt.h"
-#include "../sd_card/sd_card.h"
-#include "../../hud/hud.h"
-#include "platform/input.h"
+#include "esphome/components/sd_card/sd_card.h"
+#include "esphome/components/hud/hud.h"
+#include "input.h"
 #include <cstring>
 
 // Duke3D engine entry point — provided by jkirsons/Duke3D engine.
 // NOTE: After adding the engine submodule (Task 5.1), verify the actual
 // entry point name and signature from engine/main/. Adjust if needed.
+#ifndef DUKE3D_ENGINE_PRESENT
+// Stub — remove once the engine submodule is wired in (Task 5.1).
+extern "C" int duke3d_main(int /*argc*/, char** /*argv*/) { return 0; }
+#else
 extern "C" int duke3d_main(int argc, char** argv);
+#endif
+
+// Forward-declare the HUD instance pointer from the hud component.
+// Defined in hud.cpp (esphome::hud namespace); accessed in setup() below.
+namespace esphome { namespace hud { extern Hud* global_hud_instance; } }
 
 // global_hud: wires the HUD into platform_blit_frame() for per-frame overlay.
 // Declared extern in esp32_hal.cpp; defined here.
@@ -31,8 +40,9 @@ void Duke3DComponent::setup() {
 
     // Wire HUD global and disable Hud::loop()'s own swap_buffers() call.
     // From now on platform_blit_frame() drives both render and swap.
-    extern esphome::hud::Hud* global_hud_instance;  // defined in hud.cpp
-    global_hud = global_hud_instance;
+    // Access via fully qualified name — local extern inside duke3d namespace would
+    // resolve to esphome::duke3d::global_hud_instance instead of esphome::hud::.
+    global_hud = esphome::hud::global_hud_instance;
     if (global_hud) global_hud->set_game_running(true);
 
     instance_ = this;
