@@ -36,14 +36,17 @@ static const HUB75_I2S_CFG::i2s_pins MATRIX_PINS = {
     .a   = 45, .b   = 36, .c   = 48, .d = 35, .e = 21,
     .lat = 47, .oe  = 14, .clk = 2
 };
-// Two 64x32 panels stacked vertically to form 64x64.
-// The E address pin (GPIO 21) selects top (E=0) vs bottom (E=1) panel.
-// CHAIN_LEN=1: 64 pixels per scan row, with E bit cycling through both panels.
-// The library drives ROWS_PER_FRAME=32 scan addresses; each address drives row y (RGB1)
-// and row y+32 (RGB2) simultaneously, covering all 64 physical rows.
+// Two 64x32 panels stacked vertically to form 64x64, wired in a chain (daisy-chain
+// in series). Virtual canvas = 128x32 with CHAIN_LEN=2, PANEL_HEIGHT=32 (1/16 scan).
+// Physical layout (confirmed by diagnostic):
+//   Panel 2 (virtual x=64..127) = top physical panel, normally oriented
+//   Panel 1 (virtual x=0..63)   = bottom physical panel, physically 180° rotated
+// Logical 64x64 → virtual 128x32 transform in swap_buffers():
+//   ly <  32 (top logical)     → panel 2: vx=lx+64,  vy=ly       (no rot needed)
+//   ly >= 32 (bottom logical)  → panel 1: vx=63-lx,  vy=63-ly    (compensate 180° rot)
 static const int PANEL_WIDTH  = 64;
-static const int PANEL_HEIGHT = 64;
-static const int CHAIN_LEN    = 1;
+static const int PANEL_HEIGHT = 32;
+static const int CHAIN_LEN    = 2;
 
 void Hub75Matrix::setup() {
     const size_t buf_size = WIDTH * HEIGHT * sizeof(Color);
@@ -84,28 +87,20 @@ void Hub75Matrix::setup() {
         mark_failed();
         return;
     }
-    matrix_lib->setBrightness8(128);
-    // Diagnostic: 8 colour bands (8 rows each) to identify which virtual y-range
-    // maps to which physical panel / row position.
-    //   y= 0.. 7  RED        y= 8..15  orange
-    //   y=16..23  YELLOW     y=24..31  GREEN
-    //   y=32..39  CYAN       y=40..47  BLUE  (HUD area – overwritten by hud.cpp)
-    //   y=48..55  MAGENTA    y=56..63  WHITE
-    static const struct { uint8_t r,g,b; } BANDS[8] = {
-        {255,   0,   0}, // RED
-        {255, 128,   0}, // orange
-        {255, 255,   0}, // YELLOW
-        {  0, 255,   0}, // GREEN
-        {  0, 255, 255}, // CYAN
-        {  0,   0, 255}, // BLUE
-        {255,   0, 255}, // MAGENTA
-        {255, 255, 255}, // WHITE
-    };
-    for (int y = 0; y < HEIGHT; y++) {
-        auto& b = BANDS[y / 8];
-        for (int x = 0; x < WIDTH; x++) {
-            back_buf_[y * WIDTH + x] = Color{b.r, b.g, b.b};
-            matrix_lib->drawPixelRGB888(x, y, b.r, b.g, b.b);
+    matrix_lib->setBrightness8(64); // 1/16 scan is 2x brighter than 1/32; halve brightness
+    // Diagnostic: top logical half RED, bottom logical half BLUE.
+    // Left edge: bright white dot at every 8th row (y=0,8,16,...,56) — count them to
+    // identify which logical rows appear on which physical panel.
+    // HUD will overwrite logical ly=40..63, so only ly=32..39 stays blue on the panel.
+    for (int ly = 0; ly < HEIGHT; ly++) {
+        Color bg = (ly < 32) ? Color{180, 0, 0} : Color{0, 0, 180};
+        for (int lx = 0; lx < WIDTH; lx++) {
+            // White left-edge markers every 8 rows, 2 pixels wide
+            Color c = (lx < 2 && (ly % 8) == 0) ? Color{255, 255, 255} : bg;
+            back_buf_[ly * WIDTH + lx] = c;
+            int vx = (ly >= 32) ? (63 - lx)  : (lx + 64);
+            int vy = (ly >= 32) ? (63 - ly)  : ly;
+            matrix_lib->drawPixelRGB888(vx, vy, c.r, c.g, c.b);
         }
     }
     // Flush D-cache so GDMA sees the pixel data we just wrote to internal SRAM.
@@ -126,18 +121,17 @@ void Hub75Matrix::fill(Color c) {
 }
 
 void Hub75Matrix::swap_buffers() {
-    // Copies the back buffer into the library's DMA buffer pixel by pixel.
-    // NOT a zero-copy swap — the library's DMA scan task reads its internal
-    // buffer while this loop writes, producing a brief (~4096 pixel) tearing
-    // window per frame. At 25fps on a 64x64 LED matrix this is acceptable.
-    //
-    // For a true double-buffer swap: check if your version of
-    // ESP32-HUB75-MatrixPanel-I2S-DMA exposes flipDMABuffer() and use it.
-    for (int y = 0; y < HEIGHT; y++)
-        for (int x = 0; x < WIDTH; x++) {
-            Color& c = back_buf_[y * WIDTH + x];
-            matrix_lib->drawPixelRGB888(x, y, c.r, c.g, c.b);
+    // U-chain transform: maps logical 64x64 back buffer → physical 128x32 DMA canvas.
+    // Bottom half (ly>=32) → panel 1 (physical bottom, normal): vx=lx,     vy=ly-32
+    // Top half    (ly< 32) → panel 2 (physical top, 180° rot): vx=127-lx,  vy=31-ly
+    for (int ly = 0; ly < HEIGHT; ly++) {
+        for (int lx = 0; lx < WIDTH; lx++) {
+            Color& c = back_buf_[ly * WIDTH + lx];
+            int vx = (ly >= 32) ? (63 - lx)  : (lx + 64);
+            int vy = (ly >= 32) ? (63 - ly)  : ly;
+            matrix_lib->drawPixelRGB888(vx, vy, c.r, c.g, c.b);
         }
+    }
     // Flush D-cache so GDMA sees the writes we just made to internal SRAM.
     Cache_WriteBack_All();
 }
