@@ -116,20 +116,40 @@ time:
                 id(hud_display)->set_time(t.hour, t.minute);
 
 sensor:
+  # 8-hour air temperature forecast min/max — adjust entity IDs to match your HA setup
   - platform: homeassistant
-    id: weather_temperature
-    entity_id: sensor.weather_temperature
+    id: temp_min_8h
+    entity_id: sensor.outdoor_temperature_low
     on_value:
       then:
-        - lambda: id(hud_display)->set_temperature(x);
+        - lambda: id(hud_display)->set_min_temp(x);
+  - platform: homeassistant
+    id: temp_max_8h
+    entity_id: sensor.outdoor_temperature_high
+    on_value:
+      then:
+        - lambda: id(hud_display)->set_max_temp(x);
+  - platform: homeassistant
+    id: water_temperature
+    entity_id: sensor.water_temperature
+    on_value:
+      then:
+        - lambda: id(hud_display)->set_water_temp(x);
 
 text_sensor:
+  # Tide times from HA — format "HH:MM"; adjust entity IDs to match your HA setup
   - platform: homeassistant
-    id: weather_condition
-    entity_id: sensor.weather_condition
+    id: tide_high_time
+    entity_id: sensor.high_tide_time
     on_value:
       then:
-        - lambda: id(hud_display)->set_condition(std::string(x.c_str()));
+        - lambda: id(hud_display)->set_tide_high(std::string(x.c_str()));
+  - platform: homeassistant
+    id: tide_low_time
+    entity_id: sensor.low_tide_time
+    on_value:
+      then:
+        - lambda: id(hud_display)->set_tide_low(std::string(x.c_str()));
   - platform: template
     id: duke3d_demo
     name: "Duke3D Current Demo"

@@ -17,14 +17,20 @@ static const uint8_t FONT_5X7[][5] = {
     {0x00, 0x36, 0x36, 0x00, 0x00}, // ':'  (index 10)
     {0x00, 0x00, 0x00, 0x00, 0x00}, // ' '  (index 11)
     {0x00, 0x07, 0x05, 0x07, 0x00}, // 'deg' (index 12) — referenced by FONT_IDX_DEGREE
-    {0x3E, 0x41, 0x41, 0x41, 0x22}, // 'C'  (index 13)
+    {0x3E, 0x41, 0x41, 0x41, 0x22}, // 'C'    (index 13)
+    {0x04, 0x06, 0x3F, 0x06, 0x04}, // ↑ up   (index 14)
+    {0x08, 0x18, 0x3F, 0x18, 0x08}, // ↓ down (index 15)
+    {0x08, 0x04, 0x08, 0x04, 0x08}, // ~ wave (index 16)
 };
 
 // Use integer constants instead of char codes to avoid UTF-8/Latin-1 ambiguity.
 static const int FONT_IDX_COLON  = 10;
 static const int FONT_IDX_SPACE  = 11;
-static const int FONT_IDX_DEGREE = 12;  // degree symbol — referenced by index, not char value
+static const int FONT_IDX_DEGREE = 12;
 static const int FONT_IDX_C      = 13;
+static const int FONT_IDX_UP     = 14;
+static const int FONT_IDX_DOWN   = 15;
+static const int FONT_IDX_WAVE   = 16;
 
 inline int font_index(char c) {
     if (c >= '0' && c <= '9') return c - '0';

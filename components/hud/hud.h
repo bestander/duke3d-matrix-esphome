@@ -23,9 +23,10 @@ namespace esphome {
 namespace hud {
 
 // Renders into rows 40-63 (HUD_TOP..63) of the 64x64 display.
-// Layout:
-//   Row 40-50: temperature "22 deg C" with weather icon (left)
-//   Row 53-63: clock "HH:MM" centered
+// Layout (3 × 8-pixel bands):
+//   Band 0 (y=40-47): clock "HH:MM" (left) | water temp "~NN°C" (right)
+//   Band 1 (y=48-55): air temp range "↓NN°  ↑NN°"
+//   Band 2 (y=56-63): tide "H HH:MM  L HH:MM" (3×5 tiny font)
 class Hud
 #ifndef DUKE3D_HOST_TEST
     : public Component
@@ -39,27 +40,32 @@ public:
     void setup() override;
     void loop() override;
     float get_setup_priority() const override { return setup_priority::DATA; }
-    // Uses global_hub75 (set in hub75_matrix::setup()) — no explicit wiring needed.
-    // set_game_running(true) is called by Duke3DComponent::setup() so that
-    // Hud::loop() stops driving swap_buffers() (Duke3D's game task takes over).
     void set_game_running(bool v) { game_running_ = v; }
 #endif
 
-    void set_temperature(float celsius);           // thread-safe (Core 0 -> Core 1)
-    void set_condition(const std::string& cond);   // thread-safe
     void set_time(int hour, int minute);           // thread-safe
+    void set_min_temp(float celsius);              // 8h air temp min
+    void set_max_temp(float celsius);              // 8h air temp max
+    void set_water_temp(float celsius);            // current water temperature
+    void set_tide_high(const std::string& hhmm);  // "HH:MM"
+    void set_tide_low(const std::string& hhmm);   // "HH:MM"
 
     void render(MatrixType& display);
 
 private:
-    float temperature_ = 0.0f;
-    char  condition_[64] = {};
     int   hour_ = 0, minute_ = 0;
+    float min_temp_   = 0.0f;
+    float max_temp_   = 0.0f;
+    float water_temp_ = 0.0f;
+    char  tide_high_[6] = "--:--";
+    char  tide_low_[6]  = "--:--";
     std::mutex data_mutex_;
-    bool game_running_ = false;  // true once Duke3D takes over swap_buffers()
+    bool game_running_ = false;
 
-    void draw_char(MatrixType& d, int x, int y, int font_idx, uint8_t r, uint8_t g, uint8_t b);
-    void draw_icon(MatrixType& d, int x, int y, const char* condition);
+    void draw_char(MatrixType& d, int x, int y, int font_idx,
+                   uint8_t r, uint8_t g, uint8_t b);
+    void draw_tiny_char(MatrixType& d, int x, int y, int tiny_idx,
+                        uint8_t r, uint8_t g, uint8_t b);
 };
 
 }  // namespace hud
