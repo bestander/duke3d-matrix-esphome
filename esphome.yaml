@@ -9,6 +9,8 @@ esphome:
       - symlink:///Users/konstantinraev/work/duke3d-matrix-esphome/libs/ESP32-HUB75-MatrixPanel-I2S-DMA
     build_flags:
       - -I/Users/konstantinraev/work/duke3d-matrix-esphome/libs/ESP32-HUB75-MatrixPanel-I2S-DMA/src
+      # Duke engine includes (for platform.h -> esp32_compat.h)
+      - -I/Users/konstantinraev/work/duke3d-matrix-esphome/components/duke3d/engine/components/SDL
       # Hub75 ESP-IDF mode: disable Adafruit GFX dependency (CMakeLists sets this
       # via target_compile_options but PlatformIO doesn't run that CMakeLists).
       - -DNO_GFX
@@ -33,12 +35,16 @@ esp32:
       CONFIG_ESP_CONSOLE_UART_DEFAULT: "y"
       CONFIG_ESP_CONSOLE_SECONDARY_USB_SERIAL_JTAG: "y"
       CONFIG_SPIRAM: "y"
-      CONFIG_SPIRAM_MODE_OCT: "y"
+      CONFIG_SPIRAM_MODE_QUAD: "y"
       CONFIG_SPIRAM_SPEED_80M: "y"
       CONFIG_SPIRAM_BOOT_INIT: "y"
       CONFIG_SPIRAM_IGNORE_NOTFOUND: "y"
       CONFIG_SPIRAM_USE_MALLOC: "y"
       CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL: "16384"
+      # Allow EXT_RAM_ATTR BSS variables (hittype 288KB, sprite 176KB, pvWalls 72KB, etc.)
+      # to be placed in PSRAM BSS segment instead of internal DRAM.
+      # Without this, the engine arrays overflow internal DRAM by ~1.6MB.
+      CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY: "y"
       CONFIG_FREERTOS_HZ: "1000"
       CONFIG_ESP_MAIN_TASK_STACK_SIZE: "8192"
       CONFIG_ESP_TASK_WDT_TIMEOUT_S: "10"
@@ -58,6 +64,7 @@ hud:
 # Replace A0-A5 pad numbers with actual GPIO numbers from Adafruit Matrix Portal S3 schematic
 duke3d:
   id: game_engine
+  smoke_test: true
 
 # I2S pins: A4 and A5 for BCLK/LRCLK; DIN shared with SD MOSI (A0)
 # Ensure SD CS is de-asserted before any I2S write (handled by SPI bus arbitration)

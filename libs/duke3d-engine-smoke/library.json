@@ -1,0 +1,10 @@
+{
+  "name": "duke3d-engine-smoke",
+  "version": "0.1.0",
+  "description": "Minimal Duke3D engine objects for smoke testing",
+  "keywords": "duke3d, build-engine, smoke-test",
+  "build": {
+    "srcDir": "src"
+  }
+}
+
