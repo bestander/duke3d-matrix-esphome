@@ -1,16 +1,13 @@
 #include "renderer.h"
 
-// Nearest-neighbour downscale: 320x200 -> 64x40
-// x_src = x_dst * 320 / 64 = x_dst * 5
-// y_src = y_dst * 200 / 40 = y_dst * 5
+// Direct 1:1 blit: 64x40 8-bit indexed -> HUB75 matrix pixels.
+// The engine now renders at native matrix resolution so no downscale is needed.
 void render_frame(RenderTarget& dst,
                   const uint8_t* src,
                   const uint8_t* pal) {
     for (int y = 0; y < 40; y++) {
-        int y_src = y * 5;
         for (int x = 0; x < 64; x++) {
-            int x_src = x * 5;
-            uint8_t idx = src[y_src * 320 + x_src];
+            uint8_t idx = src[y * 64 + x];
             uint8_t r = pal[idx * 3 + 0];
             uint8_t g = pal[idx * 3 + 1];
             uint8_t b = pal[idx * 3 + 2];

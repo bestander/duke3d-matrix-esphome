@@ -5,6 +5,7 @@
 #include "esphome/components/sd_card/sd_card.h"
 #include "esphome/components/i2s_audio/i2s_audio.h"
 #include "esp_task_wdt.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <stdint.h>
@@ -21,9 +22,14 @@ extern esphome::hud::Hud* global_hud;
 //   spi_lcd_send_boarder(pixels, border) — once per frame from SDL_Flip()
 //
 // SDL_SetColors() stores the palette as byte-swapped RGB565 in lcdpal[256].
-// spi_lcd_send_boarder receives a 320x200 8-bit indexed framebuffer and
-// downscales it to 64x40 before writing to the HUB75 matrix.
+// spi_lcd_send_boarder receives a 64x40 8-bit indexed framebuffer (native
+// matrix resolution) and blits it directly to the HUB75 matrix.
 // ---------------------------------------------------------------------------
+// Diagnostic counters defined in tiles.c — read and reset each frame.
+extern "C" volatile int32_t diag_tile_loads;
+extern "C" volatile int32_t diag_tile_bytes;
+extern "C" volatile int64_t diag_tile_us;
+
 extern "C" {
 
 // Palette filled by engine's SDL_SetColors(): byte-swapped RGB565.
@@ -36,12 +42,16 @@ void spi_lcd_send_boarder(uint16_t *scr, int /*border*/) {
     auto *m = esphome::hub75_matrix::global_hub75;
     if (!m) return;
 
-    // Log stack watermark every 30 frames to catch stack exhaustion early.
     static int frame_count = 0;
-    if (++frame_count % 30 == 0) {
-        UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
-        printf("frame %d: stack_hwm=%u words free\n", frame_count, (unsigned)hwm);
-    }
+    static int64_t last_frame_us = 0;
+
+    // Snapshot and reset tile-load diagnostics accumulated since last frame.
+    int32_t tile_loads = diag_tile_loads;
+    int32_t tile_bytes = diag_tile_bytes;
+    int64_t tile_us    = diag_tile_us;
+    diag_tile_loads = 0;
+    diag_tile_bytes = 0;
+    diag_tile_us    = 0;
 
     // Convert byte-swapped RGB565 palette → RGB888 for render_frame.
     uint8_t pal[256 * 3];
@@ -54,12 +64,33 @@ void spi_lcd_send_boarder(uint16_t *scr, int /*border*/) {
     }
 
     // scr is void* cast to uint16_t* by SDL_video.c, but the data is a
-    // 320x200 8-bit indexed framebuffer — reinterpret as uint8_t*.
+    // 64x40 8-bit indexed framebuffer — reinterpret as uint8_t*.
     const uint8_t *fb = reinterpret_cast<const uint8_t *>(scr);
-    render_frame(*m, fb, pal);           // downscale 320x200 → 64x40 rows 0-39
+
+    int64_t t_blit_start = esp_timer_get_time();
+    render_frame(*m, fb, pal);           // blit 64x40 directly to rows 0-39
+    int64_t t_blit_us = esp_timer_get_time() - t_blit_start;
+
     if (global_hud) global_hud->render(*m);  // overlay rows 40-63
     m->swap_buffers();
     esp_task_wdt_reset();
+
+    // Per-frame performance report every 30 frames.
+    ++frame_count;
+    int64_t now = esp_timer_get_time();
+    int64_t total_frame_us = (last_frame_us > 0) ? (now - last_frame_us) : 0;
+    last_frame_us = now;
+
+    if (frame_count % 30 == 0) {
+        UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
+        int fps = (total_frame_us > 0) ? (int)(1000000 / total_frame_us) : 0;
+        printf("[F%d] fps≈%d  frame=%lldms  SD: %d loads %d bytes in %lldms  blit=%lldus  stack=%u\n",
+               frame_count, fps,
+               (long long)total_frame_us / 1000,
+               tile_loads, tile_bytes, (long long)tile_us / 1000,
+               (long long)t_blit_us,
+               (unsigned)hwm);
+    }
 }
 
 } // extern "C"
