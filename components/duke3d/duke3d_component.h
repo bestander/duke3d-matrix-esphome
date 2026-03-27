@@ -14,11 +14,13 @@ public:
 
     const char* current_demo() const { return current_demo_; }
     void set_smoke_test(bool v) { smoke_test_ = v; }
+    void set_usb_gamepad(bool v) { usb_gamepad_ = v; }
 
 private:
     TaskHandle_t task_handle_ = nullptr;
     char current_demo_[32] = "DEMO1.DMO";
-    bool smoke_test_ = false;
+    bool smoke_test_    = false;
+    bool usb_gamepad_   = false;
 
     static void game_task(void* arg);
     static void smoke_task(void* arg);

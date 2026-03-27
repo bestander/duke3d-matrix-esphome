@@ -22,6 +22,7 @@ idf_component_register(
         "renderer.cpp"
         "esp32_hal.cpp"
         "input.cpp"
+        "usb_gamepad.cpp"
         "engine_main_shim.c"
         ${ENGINE_SRCS}
         ${GAME_SRCS}
@@ -34,7 +35,7 @@ idf_component_register(
         "${ENGINE_DIR}/enet/include"
     COMPILE_DEFINITIONS
         DUKE3D_ENGINE_PRESENT
-    REQUIRES hub75_matrix hud sd_card i2s_audio freertos esp_task_wdt
+    REQUIRES hub75_matrix hud sd_card i2s_audio freertos esp_task_wdt usb driver
 )
 
 # mmulti.c includes <enet/enet.h> unconditionally via HAVE_ENET_ENET_H.

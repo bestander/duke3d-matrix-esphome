@@ -48,6 +48,9 @@ esp32:
       CONFIG_FREERTOS_HZ: "1000"
       CONFIG_ESP_MAIN_TASK_STACK_SIZE: "8192"
       CONFIG_ESP_TASK_WDT_TIMEOUT_S: "60"
+      # Extend interrupt watchdog timeout — SD card SPI reads during level load
+      # can hold the bus long enough to trigger the default 300ms TG1WDT reset.
+      CONFIG_ESP_INT_WDT_TIMEOUT_MS: "2000"
 
 external_components:
   - source:
@@ -64,6 +67,7 @@ hud:
 duke3d:
   id: game_engine
   smoke_test: false
+  usb_gamepad: false   # false = keep USB as JTAG/CDC debug interface
 
 # Matrix Portal S3 GPIO strip: A1=GPIO3, A2=GPIO9, A3=GPIO10, A4=GPIO11, TX=GPIO18, RX=GPIO8
 # JST 3-pin connector: A0=GPIO12

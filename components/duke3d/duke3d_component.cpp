@@ -9,6 +9,7 @@
 #include "freertos/idf_additions.h"
 #include "esp32_hal.h"
 #include "input.h"
+#include "usb_gamepad.h"
 #include <cstring>
 
 // Duke3D engine entry point — defined in engine_main_shim.c, which calls
@@ -58,6 +59,15 @@ void Duke3DComponent::setup() {
 
     instance_ = this;
     input_init();
+
+    if (usb_gamepad_) {
+        bool started = usb_gamepad_start();
+        if (started) {
+            ESP_LOGI(TAG, "USB gamepad host started (hold BOOT button at power-on to switch to debug mode)");
+        } else {
+            ESP_LOGW(TAG, "USB debug mode active — connect USB-C for JTAG/CDC logging");
+        }
+    }
 
     ESP_LOGI(TAG, "Free heap before task create: %u bytes", esp_get_free_heap_size());
     ESP_LOGI(TAG, "Free internal heap: %u bytes",

@@ -126,7 +126,7 @@ void Hud::render(MatrixType& d) {
     // Clear HUD band (dark blue background)
     for (int y = HUD_TOP; y < HUD_TOP + HUD_HEIGHT; y++)
         for (int x = 0; x < 64; x++)
-            d.set_pixel(x, y, ColorType(0, 0, 20));
+            d.set_pixel(x, y, ColorType(0, 0, 0));
 
     // ── Band 0 (y=HUD_TOP+0): Clock "HH:MM" | water "~NN°C" ──────────────
     char clock_str[6];
