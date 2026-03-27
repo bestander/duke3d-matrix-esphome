@@ -8,10 +8,9 @@ using esphome::esp_log_printf_;
 #include "freertos/task.h"
 #include <cstring>
 #include "ESP32-HUB75-MatrixPanel-I2S-DMA.h"
-// On ESP32-S3 the DMA framebuffer sits in internal SRAM which is accessed
-// through the D-cache.  Per-pixel writes stay in cache until evicted; the
-// GDMA reads from SRAM via the AHB bus and sees stale data unless we
-// explicitly write all dirty cache lines back to SRAM first.
+// Cache_WriteBack_All() flushed DMA dirty lines in setup() but was removed from
+// swap_buffers() — calling it from Core 1 while Core 0 runs the HUB75 ISR caused
+// a high-priority interrupt to dereference a NULL function pointer (InstrFetchProhibited).
 #include "rom/cache.h"
 
 namespace esphome {
@@ -132,8 +131,9 @@ void Hub75Matrix::swap_buffers() {
             matrix_lib->drawPixelRGB888(vx, vy, c.r, c.g, c.b);
         }
     }
-    // Flush D-cache so GDMA sees the writes we just made to internal SRAM.
-    Cache_WriteBack_All();
+    // Cache_WriteBack_All() removed: calling it from Core 1 while Core 0 runs the
+    // HUB75 ISR caused InstrFetchProhibited (NULL fn ptr) on Core 0. The HUB75 library
+    // writes pixels via updateMatrixDMABuffer() which already handles its own coherency.
 }
 
 }  // namespace hub75_matrix

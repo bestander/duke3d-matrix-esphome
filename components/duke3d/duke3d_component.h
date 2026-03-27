@@ -22,7 +22,8 @@ private:
 
     static void game_task(void* arg);
     static void smoke_task(void* arg);
-    static const int TASK_STACK = 32768;  // 32KB — adjust if stack overflow
+    static const int TASK_STACK       = 65536;  // 64KB — deep call stack for demo load
+    static const int SMOKE_TASK_STACK =  8192;  // 8KB — smoke task is simple, no engine calls
 };
 
 }  // namespace duke3d

@@ -47,7 +47,7 @@ esp32:
       CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY: "y"
       CONFIG_FREERTOS_HZ: "1000"
       CONFIG_ESP_MAIN_TASK_STACK_SIZE: "8192"
-      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "10"
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "60"
 
 external_components:
   - source:
@@ -61,25 +61,26 @@ hub75_matrix:
 hud:
   id: hud_display
 
-# Replace A0-A5 pad numbers with actual GPIO numbers from Adafruit Matrix Portal S3 schematic
 duke3d:
   id: game_engine
-  smoke_test: true
+  smoke_test: false
 
-# I2S pins: A4 and A5 for BCLK/LRCLK; DIN shared with SD MOSI (A0)
-# Ensure SD CS is de-asserted before any I2S write (handled by SPI bus arbitration)
+# Matrix Portal S3 GPIO strip: A1=GPIO3, A2=GPIO9, A3=GPIO10, A4=GPIO11, TX=GPIO18, RX=GPIO8
+# JST 3-pin connector: A0=GPIO12
+# SD card (SPI) uses A1-A3 + JST A0 for CS.
+# I2S amp uses A4 + RX + TX. TX/RX are safe to repurpose — logging uses USB JTAG, not UART.
 i2s_audio:
   id: amp
-  bclk_pin:  5   # A4 — verify from schematic
-  lrclk_pin: 6   # A5 — verify from schematic
-  din_pin:   1   # A0 — shared with SD MOSI, safe when SD CS deasserted
+  bclk_pin:  12   # A0 (JST connector)
+  lrclk_pin: 8    # RX
+  din_pin:   18   # TX
 
 sd_card:
   id: sdcard
-  mosi_pin: 1   # A0 — verify from schematic
-  miso_pin: 2   # A1
-  clk_pin:  3   # A2
-  cs_pin:   4   # A3
+  mosi_pin: 3    # A1
+  miso_pin: 9    # A2
+  clk_pin:  10   # A3
+  cs_pin:   11   # A4
 
 wifi:
   ssid: !secret wifi_ssid
@@ -104,6 +105,9 @@ logger:
   logs:
     hub75: DEBUG
     S3: DEBUG
+    wifi: WARN
+    wifi_esp32: WARN
+    esp32_ble: WARN
 
 time:
   - platform: homeassistant

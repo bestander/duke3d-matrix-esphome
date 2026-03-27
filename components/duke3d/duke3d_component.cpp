@@ -6,6 +6,8 @@
 #include "esphome/components/hud/hud.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "freertos/idf_additions.h"
+#include "esp32_hal.h"
 #include "input.h"
 #include <cstring>
 
@@ -57,16 +59,29 @@ void Duke3DComponent::setup() {
     instance_ = this;
     input_init();
 
-    xTaskCreatePinnedToCore(
+    ESP_LOGI(TAG, "Free heap before task create: %u bytes", esp_get_free_heap_size());
+    ESP_LOGI(TAG, "Free internal heap: %u bytes",
+             heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+
+    const int stack = smoke_test_ ? SMOKE_TASK_STACK : TASK_STACK;
+    // Allocate task stack from PSRAM — internal DRAM is fragmented after WiFi+SD+HUB75 DMA.
+    // PSRAM has ~220KB free; internal only has ~72KB in small fragments.
+    BaseType_t rc = xTaskCreatePinnedToCoreWithCaps(
         smoke_test_ ? smoke_task : game_task,
         smoke_test_ ? "duke3d_smoke" : "duke3d",
-        TASK_STACK,
+        stack,
         this,
         5,      // priority — below HUB-75 ISR (which must be highest)
         &task_handle_,
-        1       // Core 1
+        1,      // Core 1
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
     );
-    ESP_LOGI(TAG, "Duke3D %s task started on Core 1", smoke_test_ ? "smoke" : "game");
+    if (rc != pdPASS) {
+        ESP_LOGE(TAG, "xTaskCreatePinnedToCore FAILED (rc=%d) — not enough RAM?", rc);
+        mark_failed();
+        return;
+    }
+    ESP_LOGI(TAG, "Duke3D %s task started on Core 1 (stack=%d)", smoke_test_ ? "smoke" : "game", stack);
 }
 
 void Duke3DComponent::game_task(void* arg) {
@@ -81,11 +96,12 @@ void Duke3DComponent::game_task(void* arg) {
     strncpy(self->current_demo_, "DEMO1.DMO", sizeof(self->current_demo_) - 1);
     ESP_LOGI(TAG, "Starting Duke3D engine (game_dir=/sdcard)");
 
-    // Engine argv: -game_dir /sdcard /nm(no music) /ns(no sound) /dDEMO1.DMO
-    // Demo flag format: /d<filename> — engine cycles demos internally.
+    // Engine argv: -game_dir /sdcard/duke3d /nm(no music) /ns(no sound) /dDEMO1.DMO
+    // game_dir default is already patched to /sdcard/duke3d in cache.c, but passing
+    // -game_dir here keeps checkcommandline consistent for any other path resolution.
     char* argv[] = {
         (char*)"duke3d",
-        (char*)"-game_dir", (char*)"/sdcard",
+        (char*)"-game_dir", (char*)"/sdcard/duke3d",
         (char*)"/nm",
         (char*)"/ns",
         (char*)"/dDEMO1.DMO",
@@ -102,17 +118,20 @@ void Duke3DComponent::smoke_task(void* arg) {
 
     strncpy(self->current_demo_, "SMOKE", sizeof(self->current_demo_) - 1);
 
-    // Register with TWDT; we feed it via esp_task_wdt_reset() each frame.
+    // Register with TWDT; we feed it via platform_blit_frame → esp_task_wdt_reset().
     esp_task_wdt_add(nullptr);
 
-    // Use output-resolution buffer (64x40 = 2560 bytes) — fits in internal RAM
-    // with no PSRAM required. clearbufbyte still exercises the real engine routine.
-    constexpr int DST_W = 64;
-    constexpr int DST_H = 40;
-    constexpr size_t FB_SIZE = DST_W * DST_H;   // 2560 bytes
+    // 320x200 framebuffer — same size as the real engine's SDL surface.
+    // Allocated from PSRAM (same as SDL_CreateRGBSurface does in the real game).
+    // platform_blit_frame() will downscale this 5:1 to 64x40 exactly as the game does.
+    constexpr int SRC_W = 320;
+    constexpr int SRC_H = 200;
+    constexpr size_t FB_SIZE  = SRC_W * SRC_H;  // 64000 bytes
     constexpr size_t PAL_SIZE = 256 * 3;
 
-    auto* fb  = static_cast<uint8_t*>(heap_caps_malloc(FB_SIZE,  MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    // Try PSRAM first; fall back to internal only if PSRAM init failed.
+    auto* fb = static_cast<uint8_t*>(heap_caps_malloc(FB_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!fb) fb = static_cast<uint8_t*>(heap_caps_malloc(FB_SIZE, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     auto* pal = static_cast<uint8_t*>(heap_caps_malloc(PAL_SIZE, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     if (!fb || !pal) {
         ESP_LOGE(TAG, "Smoke test alloc failed (fb=%p pal=%p)", fb, pal);
@@ -121,15 +140,16 @@ void Duke3DComponent::smoke_task(void* arg) {
         vTaskDelete(nullptr);
         return;
     }
+    ESP_LOGI(TAG, "smoke_task: fb=%p (PSRAM=%d)", (void*)fb,
+             esp_ptr_external_ram(fb) ? 1 : 0);
 
-    // Vivid 3-segment spectrum: R→G, G→B, B→R — every index produces a bright saturated colour.
-    // Index 0 = bright red, 85 = bright green, 170 = bright blue — no black anywhere.
+    // Vivid 3-segment spectrum: R→G, G→B, B→R — every index is a bright saturated colour.
     for (int i = 0; i < 256; i++) {
-        const int seg = (i * 3) / 256;          // 0, 1, or 2
-        const int v   = (i * 3) % 256;          // 0..255 ramp within segment
+        const int seg = (i * 3) / 256;
+        const int v   = (i * 3) % 256;
         switch (seg) {
             case 0:
-                pal[i*3+0] = (uint8_t)(255 - v); pal[i*3+1] = (uint8_t)v;       pal[i*3+2] = 0; break;
+                pal[i*3+0] = (uint8_t)(255 - v); pal[i*3+1] = (uint8_t)v;        pal[i*3+2] = 0; break;
             case 1:
                 pal[i*3+0] = 0;                  pal[i*3+1] = (uint8_t)(255 - v); pal[i*3+2] = (uint8_t)v; break;
             default:
@@ -137,57 +157,43 @@ void Duke3DComponent::smoke_task(void* arg) {
         }
     }
 
-    // Direct handle to the matrix — smoke test bypasses platform_blit_frame
-    // to avoid blocking on the HUD mutex (HA time callbacks hold it every second).
-    auto* m = esphome::hub75_matrix::global_hub75;
-    if (!m) {
-        ESP_LOGE(TAG, "smoke_task: global_hub75 is null — aborting");
-        heap_caps_free(fb);
-        heap_caps_free(pal);
-        vTaskDelete(nullptr);
-        return;
-    }
-    ESP_LOGI(TAG, "smoke_task: entering render loop (global_hub75=%p)", (void*)m);
-
-    // Start at t=85 → palette[85]=(0,255,0)=GREEN so the first frame is
-    // immediately distinguishable from the red/blue hub75 diagnostic.
+    // Start at t=85 → palette[85]=(0,255,0)=GREEN, immediately distinct from
+    // the hub75 driver's red/blue diagnostic pattern shown before we take over.
     int t = 85;
     int64_t last_log_us = esp_timer_get_time();
     while (true) {
-        // Exercise a real engine routine (linked from fixedPoint_math.c).
-        // Pack the same palette index into all 4 bytes so clearbufbyte gives a uniform fill.
+        // Fill background using a real engine routine from fixedPoint_math.c.
         const uint8_t bg = (uint8_t)(t & 0xFF);
         const uint32_t raw = (uint32_t)bg | ((uint32_t)bg << 8) | ((uint32_t)bg << 16) | ((uint32_t)bg << 24);
         clearbufbyte(fb, FB_SIZE, (int32_t)raw);
 
-        // Moving box in complementary colour (~180° opposite on palette wheel).
+        // Moving box in complementary colour (~180° opposite on the palette wheel).
+        // In 320x200 space → downscales to ~20x12 on the 64x40 display.
         const uint8_t box_idx = (uint8_t)((t + 128) & 0xFF);
-        const int box_w = 20, box_h = 12;
-        const int ox = (t * 2) % (DST_W - box_w);
-        const int oy = t % (DST_H - box_h);
+        const int box_w = 100, box_h = 60;
+        const int ox = (t * 10) % (SRC_W - box_w);
+        const int oy = (t * 5)  % (SRC_H - box_h);
         for (int y = 0; y < box_h; y++) {
-            uint8_t* row = fb + (oy + y) * DST_W + ox;
+            uint8_t* row = fb + (oy + y) * SRC_W + ox;
             for (int x = 0; x < box_w; x++) row[x] = box_idx;
         }
-        // Diagonal stripe for additional contrast.
-        for (int i = 0; i < DST_H; i++) {
-            const int x = (i + (t * 3)) % DST_W;
-            fb[i * DST_W + x] = (uint8_t)((t + 64 + i) & 0xFF);
+        // Diagonal stripe across full 320x200.
+        for (int i = 0; i < SRC_H; i++) {
+            const int x = (i + (t * 15)) % SRC_W;
+            fb[i * SRC_W + x] = (uint8_t)((t + 64 + i) & 0xFF);
         }
 
-        // Write 64x40 fb directly to matrix — no 5:1 downscale needed for smoke test.
-        for (int y = 0; y < DST_H; y++) {
-            for (int x = 0; x < DST_W; x++) {
-                uint8_t idx = fb[y * DST_W + x];
-                m->set_pixel(x, y, esphome::hub75_matrix::Color(pal[idx*3], pal[idx*3+1], pal[idx*3+2]));
-            }
-        }
-        m->swap_buffers();
-        esp_task_wdt_reset();
+        // Hand off to the same pipeline the real engine uses:
+        //   render_frame() → 5:1 downscale to 64x40
+        //   global_hud->render() → HUD overlay on rows 40-63
+        //   swap_buffers()
+        //   esp_task_wdt_reset()
+        platform_blit_frame(fb, pal);
 
         int64_t now = esp_timer_get_time();
         if (now - last_log_us >= 1000000) {
-            ESP_LOGI(TAG, "smoke running (t=%d)", t);
+            ESP_LOGI(TAG, "smoke running (t=%d, fb_psram=%d)", t,
+                     esp_ptr_external_ram(fb) ? 1 : 0);
             last_log_us = now;
         }
 

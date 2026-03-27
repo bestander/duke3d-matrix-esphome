@@ -5,6 +5,8 @@
 #include "esphome/components/sd_card/sd_card.h"
 #include "esphome/components/i2s_audio/i2s_audio.h"
 #include "esp_task_wdt.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <stdint.h>
 
 // global_hud is defined in duke3d_component.cpp and set during Duke3DComponent::setup().
@@ -33,6 +35,13 @@ void spi_lcd_clear() {}  // no-op: clearing is done implicitly by swap_buffers
 void spi_lcd_send_boarder(uint16_t *scr, int /*border*/) {
     auto *m = esphome::hub75_matrix::global_hub75;
     if (!m) return;
+
+    // Log stack watermark every 30 frames to catch stack exhaustion early.
+    static int frame_count = 0;
+    if (++frame_count % 30 == 0) {
+        UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
+        printf("frame %d: stack_hwm=%u words free\n", frame_count, (unsigned)hwm);
+    }
 
     // Convert byte-swapped RGB565 palette → RGB888 for render_frame.
     uint8_t pal[256 * 3];

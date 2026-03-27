@@ -13,6 +13,7 @@ SdCard* global_sd_card = nullptr;
 
 void SdCard::setup() {
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+    host.max_freq_khz = 4000;  // 4 MHz — conservative for long wires on breadboard
 
     spi_bus_config_t bus = {};
     bus.mosi_io_num = mosi_;
