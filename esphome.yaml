@@ -10,6 +10,7 @@ esphome:
     build_flags:
       - -I/Users/konstantinraev/work/duke3d-matrix-esphome/libs/ESP32-HUB75-MatrixPanel-I2S-DMA/src
       # Duke engine includes (for platform.h -> esp32_compat.h)
+      - -I/Users/konstantinraev/work/duke3d-matrix-esphome/components/duke3d
       - -I/Users/konstantinraev/work/duke3d-matrix-esphome/components/duke3d/engine/components/SDL
       # Hub75 ESP-IDF mode: disable Adafruit GFX dependency (CMakeLists sets this
       # via target_compile_options but PlatformIO doesn't run that CMakeLists).
@@ -48,9 +49,9 @@ esp32:
       CONFIG_FREERTOS_HZ: "1000"
       CONFIG_ESP_MAIN_TASK_STACK_SIZE: "8192"
       CONFIG_ESP_TASK_WDT_TIMEOUT_S: "60"
-      # Extend interrupt watchdog timeout — SD card SPI reads during level load
-      # can hold the bus long enough to trigger the default 300ms TG1WDT reset.
-      CONFIG_ESP_INT_WDT_TIMEOUT_MS: "2000"
+      # Extend interrupt watchdog timeout — E4L11 level load takes up to 15s of
+      # sequential SD card reads during docacheit(); default 300ms is far too short.
+      CONFIG_ESP_INT_WDT_TIMEOUT_MS: "15000"
 
 external_components:
   - source:

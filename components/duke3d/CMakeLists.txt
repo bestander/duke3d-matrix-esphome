@@ -21,6 +21,7 @@ idf_component_register(
         "duke3d_component.cpp"
         "renderer.cpp"
         "esp32_hal.cpp"
+        "tilecache.cpp"
         "input.cpp"
         "usb_gamepad.cpp"
         "engine_main_shim.c"

@@ -8,6 +8,7 @@
 #include "esp_timer.h"
 #include "freertos/idf_additions.h"
 #include "esp32_hal.h"
+#include "tilecache.h"
 #include "input.h"
 #include "usb_gamepad.h"
 #include <cstring>
@@ -104,7 +105,16 @@ void Duke3DComponent::game_task(void* arg) {
     // The engine uses open("DUKE3D.GRP", ...) with relative paths; -game_dir tells
     // it where to look. GRP file must be at /sdcard/DUKE3D.GRP (case-insensitive).
     strncpy(self->current_demo_, "DEMO1.DMO", sizeof(self->current_demo_) - 1);
-    ESP_LOGI(TAG, "Starting Duke3D engine (game_dir=/sdcard)");
+    ESP_LOGI(TAG, "Starting Duke3D engine (game_dir=/sdcard/duke3d)");
+
+    // Build tile cache from GRP on first boot (or when GRP changes).
+    // Subsequent boots just validate the header (~1ms) and skip the build.
+    printf("[duke3d] calling tilecache_build_if_needed\n");
+    bool tc_built = tilecache_build_if_needed("/sdcard/duke3d/DUKE3D.GRP",
+                                              "/sdcard/duke3d/TCACHE.BIN");
+    printf("[duke3d] tilecache_build_if_needed returned %d\n", (int)tc_built);
+    bool tc_open = tilecache_open("/sdcard/duke3d/TCACHE.BIN");
+    printf("[duke3d] tilecache_open returned %d\n", (int)tc_open);
 
     // Engine argv: -game_dir /sdcard/duke3d /nm(no music) /ns(no sound) /dDEMO1.DMO
     // game_dir default is already patched to /sdcard/duke3d in cache.c, but passing
@@ -118,7 +128,7 @@ void Duke3DComponent::game_task(void* arg) {
         nullptr
     };
     duke3d_main(6, argv);
-    // main() returns when the engine exits. TWDT fed per-frame in spi_lcd_send_boarder.
+    tilecache_close();
     ESP_LOGI(TAG, "Duke3D engine exited");
     vTaskDelete(nullptr);
 }

@@ -13,7 +13,7 @@ SdCard* global_sd_card = nullptr;
 
 void SdCard::setup() {
     sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    host.max_freq_khz = 4000;  // 4 MHz — conservative for long wires on breadboard
+    host.max_freq_khz = 20000;  // 20 MHz — max for SDSPI mode
 
     spi_bus_config_t bus = {};
     bus.mosi_io_num = mosi_;
@@ -21,7 +21,7 @@ void SdCard::setup() {
     bus.sclk_io_num = sck_;
     bus.quadwp_io_num = -1;
     bus.quadhd_io_num = -1;
-    bus.max_transfer_sz = 4096;
+    bus.max_transfer_sz = 32768;  // larger DMA buffer reduces per-transaction overhead
 
     esp_err_t ret = spi_bus_initialize(
         static_cast<spi_host_device_t>(host.slot), &bus, SDSPI_DEFAULT_DMA);
