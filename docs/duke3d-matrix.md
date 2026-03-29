@@ -1,7 +1,7 @@
 # Duke3D on ESP32-S3 LED Matrix
 
 **Project:** `duke3d-matrix-esphome`  
-**Merged from:** design spec (2026-03-17), implementation plan (2026-03-17), PSRAM plan (2026-03-28)
+**Merged from:** design spec (2026-03-17), implementation plan (2026-03-17), PSRAM plan (2026-03-28), GRP splash plan (2026-03-29)
 
 This document is the single source of truth for goals, architecture, and memory strategy. Pin numbers and `esphome.yaml` are authoritative for wiring; narrative below may reference **Adafruit Matrix Portal S3** as the intended panel while the checked-in board may be `esp32-s3-devkitc-1` during bring-up.
 
@@ -187,10 +187,29 @@ See `partitions.csv` — typical layout: NVS, OTA data, dual app slots, FAT for 
 ### MicroSD layout
 
 ```
-/duke3d/DUKE3D.GRP          shareware or full game data
+/sdcard/duke3d/DUKE3D.GRP     game data (GRP)
+/sdcard/duke3d/LOADSCR.RGB    optional boot splash cache (see below)
 ```
 
-Optional tile-cache file(s) may be built on first boot to reduce GRP seek load.
+Optional `TCACHE.BIN` (or similar) may be built on first boot to reduce GRP seek load.
+
+### Boot splash (GRP cache)
+
+On startup, `hub75_matrix` builds or loads a **64×40×3 RGB888** splash from `DUKE3D.GRP` (same aspect as the game strip). Implementation lives in `components/hub75_matrix/hub75_matrix.cpp` (`grp_title_splash_build_cache_if_needed`).
+
+| Item | Detail |
+|------|--------|
+| **Output** | `/sdcard/duke3d/LOADSCR.RGB` (fallback `/sdcard/LOADSCR.RGB`), 8.3-safe names |
+| **Header** | 8-byte magic `SPLASH05`, 4-byte LE `grp_size`, 4 reserved (0); then 7680 bytes RGB |
+| **Tile choice** | Prefer picnums in order: **3281** (LOADSCREEN), 2456, 2492, 2493; else first 320×200 tile in the GRP |
+| **ART layout** | Pixel data is **column-major** (`index = x * height + y`), matching `tiles.c` |
+| **Palettes** | `PALETTE.DAT` for game / LOADSCREEN; `LOOKUP.DAT` extracts **titlepal** / **drealms** for menu-style tiles when needed |
+| **Atomic write** | `LOADSCR.TMP` then `remove` destination + `rename`; FAT often returns `EEXIST` on replace-rename |
+| **Task** | Built on a dedicated FreeRTOS task so `loopTask` stack is not exhausted |
+
+Logs: `grp_splash: …`, `hub75: splash source=sd_cache` (or compiled/solid if no SD cache).
+
+Do not set `splash_image:` in ESPHome if you want SD-only splash; a generated header would override when cache is missing.
 
 ---
 

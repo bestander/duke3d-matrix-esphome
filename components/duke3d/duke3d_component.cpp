@@ -1,6 +1,7 @@
 #include "duke3d_component.h"
 #include "duke3d_wifi_sync.h"
 #include "esphome/components/hub75_matrix/hub75_matrix.h"
+#include "esphome/components/time/real_time_clock.h"
 #include "esphome/core/log.h"
 #include "esp_task_wdt.h"
 #include "esphome/components/sd_card/sd_card.h"
@@ -15,6 +16,8 @@
 #include "input.h"
 #include "usb_gamepad.h"
 #include <cstring>
+#include <dirent.h>
+#include <strings.h>
 
 // Duke3D engine entry point — defined in engine_main_shim.c, which calls
 // the engine's main() in game.c.
@@ -36,20 +39,61 @@ volatile bool g_wifi_window_requested = false;
 // Implemented in `engine/components/Engine/fixedPoint_math.c`.
 extern "C" void clearbufbyte(void* D, int32_t c, int32_t a);
 
-namespace {
-constexpr EventBits_t DUKE3D_BOOTSTRAP_OK = 1 << 0;
-
-// Shareware GRP ships three demo recordings.
-static const char* const SHAREWARE_DEMOS[] = { "DEMO1.DMO", "DEMO2.DMO", "DEMO3.DMO" };
-static const int NUM_SHAREWARE_DEMOS = 3;
-}  // namespace
-
 static esphome::duke3d::Duke3DComponent* g_duke3d_component = nullptr;
 
 namespace esphome {
 namespace duke3d {
 
 static const char* TAG = "duke3d";
+
+namespace {
+
+constexpr EventBits_t DUKE3D_BOOTSTRAP_OK = 1 << 0;
+
+bool filename_is_dmo(const char* name) {
+    const char* dot = strrchr(name, '.');
+    if (!dot)
+        return false;
+    return strcasecmp(dot, ".dmo") == 0;
+}
+
+// Collect *.dmo from game_dir on SD, pick one at random. Returns false if none found.
+bool pick_random_demo_dmo(const char* game_dir, char* out, size_t out_sz) {
+    constexpr size_t kMaxDemos = 24;
+    char names[kMaxDemos][32];
+    size_t n = 0;
+
+    DIR* d = opendir(game_dir);
+    if (!d) {
+        ESP_LOGE(TAG, "opendir(%s) failed — cannot scan for .dmo", game_dir);
+        return false;
+    }
+    struct dirent* ent;
+    while ((ent = readdir(d)) != nullptr && n < kMaxDemos) {
+        if (ent->d_name[0] == '.')
+            continue;
+#if defined(DT_REG) && defined(DT_UNKNOWN)
+        if (ent->d_type != DT_REG && ent->d_type != DT_UNKNOWN)
+            continue;
+#endif
+        if (!filename_is_dmo(ent->d_name))
+            continue;
+        strncpy(names[n], ent->d_name, sizeof(names[0]) - 1);
+        names[n][sizeof(names[0]) - 1] = '\0';
+        n++;
+    }
+    closedir(d);
+
+    if (n == 0) {
+        ESP_LOGW(TAG, "no .dmo files in %s", game_dir);
+        return false;
+    }
+    const size_t pick = (size_t)(esp_random() % (uint32_t)n);
+    snprintf(out, out_sz, "%s", names[pick]);
+    return true;
+}
+
+}  // namespace
 
 void Duke3DComponent::setup() {
     ESP_LOGI(TAG, "setup(smoke_test=%s)", smoke_test_ ? "true" : "false");
@@ -70,7 +114,9 @@ void Duke3DComponent::setup() {
     }
 
     global_hud = esphome::hud::global_hud_instance;
-    if (global_hud) global_hud->set_game_running(true);
+    // Until duke3d_main(), Hud::loop() drives render+swap from back_buf_ (splash rows 0–39 from
+    // Hub75::setup, same direct drawPixel path as the old red/blue diagnostic). Smoke test skips HUD.
+    if (global_hud) global_hud->set_game_running(smoke_test_);
 
     g_duke3d_component = this;
     input_init();
@@ -114,6 +160,8 @@ void Duke3DComponent::loop() {
     const int64_t now_us = esp_timer_get_time();
 
     // --- Phase 1: keep WiFi up until Home Assistant / API have had time to push state ---
+    // Releasing too early (e.g. fixed grace only) stops WiFi before HA time sync + sensor pushes,
+    // leaving the HUD at 00:00 and 0° until the next in-game WiFi window.
     if (!bootstrap_released_) {
         wifi_ap_record_t ap{};
         if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
@@ -123,12 +171,15 @@ void Duke3DComponent::loop() {
             first_wifi_connected_at_us_ != 0 &&
             (now_us - first_wifi_connected_at_us_) >=
                 (int64_t)wifi_bootstrap_grace_s_ * 1000000LL;
+        const bool ha_time_ready = (time_id_ == nullptr) || time_id_->now().is_valid();
         const bool timeout = now_us >= 120000000LL;  // 120 s absolute cap
 
-        if (grace_ok || timeout) {
+        if ((grace_ok && ha_time_ready) || timeout) {
             xEventGroupSetBits(sync_events_, DUKE3D_BOOTSTRAP_OK);
             bootstrap_released_ = true;
-            ESP_LOGI(TAG, "Bootstrap: released (grace=%s)", grace_ok ? "yes" : "no (timeout)");
+            ESP_LOGI(TAG,
+                     "Bootstrap: released (assoc_grace_ok=%s ha_time_ready=%s timeout=%s)",
+                     grace_ok ? "yes" : "no", ha_time_ready ? "yes" : "no", timeout ? "yes" : "no");
         }
         return;
     }
@@ -183,10 +234,14 @@ void Duke3DComponent::game_task(void* arg) {
         vTaskDelay(pdMS_TO_TICKS(500));
     }
 
-    const int pick = (int)(esp_random() % (uint32_t)NUM_SHAREWARE_DEMOS);
-    strncpy(self->current_demo_, SHAREWARE_DEMOS[pick], sizeof(self->current_demo_) - 1);
-    self->current_demo_[sizeof(self->current_demo_) - 1] = '\0';
-    ESP_LOGI(TAG, "Random demo: %s", self->current_demo_);
+    char game_dir[48];
+    snprintf(game_dir, sizeof(game_dir), "%s/duke3d", sd_card::SdCard::MOUNT_POINT);
+    if (!pick_random_demo_dmo(game_dir, self->current_demo_, sizeof(self->current_demo_))) {
+        strncpy(self->current_demo_, "DEMO1.DMO", sizeof(self->current_demo_) - 1);
+        self->current_demo_[sizeof(self->current_demo_) - 1] = '\0';
+        ESP_LOGW(TAG, "falling back to %s", self->current_demo_);
+    }
+    ESP_LOGI(TAG, "Random demo (from disk): %s", self->current_demo_);
 
     char demo_arg[40];
     snprintf(demo_arg, sizeof(demo_arg), "/d%s", self->current_demo_);
@@ -204,6 +259,8 @@ void Duke3DComponent::game_task(void* arg) {
         printf("[duke3d] tile_cache disabled — loading tiles directly from GRP\n");
     }
 
+    if (global_hud) global_hud->set_game_running(true);
+
     char* argv[] = {
         (char*)"duke3d",
         (char*)"-game_dir", (char*)"/sdcard/duke3d",
@@ -212,6 +269,16 @@ void Duke3DComponent::game_task(void* arg) {
         demo_arg,
         nullptr
     };
+    // Splash hold must start here, not in Hub75::setup — pause_wifi bootstrap can delay the engine
+    // by 10+ s, so a timer begun at panel init expires before the first blit (splash erased to black).
+    {
+        auto* m = esphome::hub75_matrix::global_hub75;
+        if (m) {
+            esphome::hub75_matrix::hub75_arm_boot_splash_hold(5000);
+            if (global_hud) global_hud->render(*m);
+            m->swap_buffers();
+        }
+    }
     duke3d_main(6, argv);
     if (self->pause_wifi_) {
         printf("[duke3d] game exited — restarting WiFi\n");

@@ -61,21 +61,25 @@ external_components:
 
 hub75_matrix:
   id: matrix_display
+  # Boot splash: only from SD — /sdcard/duke3d/LOADSCR.RGB (GRP LOADSCREEN 3281 + PALETTE.DAT, Hub75 setup).
+  # Do not embed splash_image here or compiled PNG wins over SD whenever cache is missing.
 
 hud:
   id: hud_display
 
 duke3d:
   id: game_engine
+  # Wait for HA time sync before stopping WiFi at boot; otherwise clock stays 00:00 and sensors may not arrive.
+  time_id: ha_time
   smoke_test: false
   usb_gamepad: false   # false = keep USB as JTAG/CDC debug interface
   # tile_cache: pre-extracts ≤128px tiles from DUKE3D.GRP into TCACHE.BIN on SD (one-time build).
   # At runtime loadtile() reads that flat file instead of seeking inside GRP/ART — fewer SD hits,
   # less stutter. Extra PSRAM helps engine heaps (Initcache); this is separate I/O optimization.
-  tile_cache: true
+  tile_cache: false
   pause_wifi: true
-  # Seconds after STA associates before WiFi is stopped (HA API + sensors can update).
-  wifi_bootstrap_grace_s: 12
+  # Minimum seconds after WiFi associates; bootstrap also waits for time_id to be valid (unless 120s cap).
+  wifi_bootstrap_grace_s: 8
   # Min seconds between HA WiFi syncs triggered by non-demo level loads (debounce).
   wifi_sync_min_interval_s: 90
 

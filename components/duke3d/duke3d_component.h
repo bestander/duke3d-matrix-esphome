@@ -6,6 +6,9 @@
 #include "freertos/event_groups.h"
 
 namespace esphome {
+namespace time {
+class RealTimeClock;
+}
 namespace duke3d {
 
 class Duke3DComponent : public Component {
@@ -20,6 +23,8 @@ public:
     void set_pause_wifi(bool v) { pause_wifi_ = v; }
     void set_wifi_bootstrap_grace_s(uint32_t v) { wifi_bootstrap_grace_s_ = v; }
     void set_wifi_sync_min_interval_s(uint32_t v) { wifi_sync_min_interval_s_ = v; }
+    /// If set, bootstrap keeps WiFi up until `now().is_valid()` (HA time synced), not just grace_s.
+    void set_time_id(time::RealTimeClock *t) { time_id_ = t; }
 
     /// Engine hook: queue cooperative HA / WiFi sync (debounced).
     void queue_ha_sync_if_eligible(uint8_t g_mode);
@@ -36,6 +41,7 @@ private:
     bool pause_wifi_ = false;
     uint32_t wifi_bootstrap_grace_s_ = 12;
     uint32_t wifi_sync_min_interval_s_ = 90;
+    time::RealTimeClock *time_id_{nullptr};
     bool bootstrap_released_ = false;
     int64_t first_wifi_connected_at_us_ = 0;
     WifiWindowState wifi_state_ = WifiWindowState::STOPPED;

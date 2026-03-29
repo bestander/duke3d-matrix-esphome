@@ -70,7 +70,9 @@ void spi_lcd_send_boarder(uint16_t *scr, int /*border*/) {
     const uint8_t *fb = reinterpret_cast<const uint8_t *>(scr);
 
     int64_t t_blit_start = esp_timer_get_time();
-    render_frame(*m, fb, pal);           // blit 64x40 directly to rows 0-39
+    if (!esphome::hub75_matrix::hub75_boot_splash_hold_active()) {
+        render_frame(*m, fb, pal);  // blit 64x40 directly to rows 0-39
+    }
     int64_t t_blit_us = esp_timer_get_time() - t_blit_start;
 
     if (global_hud) global_hud->render(*m);  // overlay rows 40-63
@@ -107,7 +109,9 @@ extern "C" void platform_blit_frame(const uint8_t* src, const uint8_t* pal) {
     auto* m = esphome::hub75_matrix::global_hub75;
     if (!m) return;
 
-    render_frame(*m, src, pal);      // writes rows 0-39
+    if (!esphome::hub75_matrix::hub75_boot_splash_hold_active()) {
+        render_frame(*m, src, pal);  // writes rows 0-39
+    }
 
     if (global_hud) global_hud->render(*m);  // overlays rows 40-63
 
