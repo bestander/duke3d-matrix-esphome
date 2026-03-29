@@ -6,14 +6,9 @@
 #include <stdint.h>
 #include <errno.h>
 
-// Must match MAXTILES in build.h and MAX_TILE_DIM in tiles.c.
+// Must match MAXTILES in build.h — DUKE3D_TILE_MAX_NATIVE_EDGE in tilecache.h
 #define TC_MAXTILES    9216
-// Tiles at or below this dimension are cached at native resolution (no
-// downscaling).  Tiles larger than TC_MAX_DIM are skipped — they fall back to
-// the original GRP path at runtime, which is slower but preserves quality.
-// 128 covers virtually all wall textures and sprites in Duke3D; only
-// full-screen art (320×200 title/menu tiles) falls through to the GRP.
-#define TC_MAX_DIM     128
+#define TC_MAX_DIM     DUKE3D_TILE_MAX_NATIVE_EDGE
 // "TCBUILD!" written at start of do_build; overwritten with "TCACHE04" only
 // after the entry table has been successfully committed.  A file with
 // "TCBUILD!" magic is treated as corrupt by tilecache_build_if_needed().

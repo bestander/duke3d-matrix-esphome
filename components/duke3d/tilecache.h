@@ -2,12 +2,16 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+// Native max edge length (pixels) for tiles stored in TCACHE.BIN and for the
+// engine GRP load path — single policy so cache hits and misses match.
+#define DUKE3D_TILE_MAX_NATIVE_EDGE 128
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 // Hit descriptor returned by tilecache_lookup().
-// w, h are the pre-downscaled dimensions stored in the cache file.
+// w, h are the stored pixel dimensions in the cache file.
 // off is the byte offset of the pixel data within TCACHE.BIN.
 typedef struct {
     int      w;

@@ -1,10 +1,12 @@
 #include "duke3d_component.h"
+#include "duke3d_wifi_sync.h"
 #include "esphome/components/hub75_matrix/hub75_matrix.h"
 #include "esphome/core/log.h"
 #include "esp_task_wdt.h"
 #include "esphome/components/sd_card/sd_card.h"
 #include "esphome/components/hud/hud.h"
 #include "esp_heap_caps.h"
+#include "esp_random.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/idf_additions.h"
@@ -34,12 +36,20 @@ volatile bool g_wifi_window_requested = false;
 // Implemented in `engine/components/Engine/fixedPoint_math.c`.
 extern "C" void clearbufbyte(void* D, int32_t c, int32_t a);
 
+namespace {
+constexpr EventBits_t DUKE3D_BOOTSTRAP_OK = 1 << 0;
+
+// Shareware GRP ships three demo recordings.
+static const char* const SHAREWARE_DEMOS[] = { "DEMO1.DMO", "DEMO2.DMO", "DEMO3.DMO" };
+static const int NUM_SHAREWARE_DEMOS = 3;
+}  // namespace
+
+static esphome::duke3d::Duke3DComponent* g_duke3d_component = nullptr;
 
 namespace esphome {
 namespace duke3d {
 
 static const char* TAG = "duke3d";
-static Duke3DComponent* instance_ = nullptr;
 
 void Duke3DComponent::setup() {
     ESP_LOGI(TAG, "setup(smoke_test=%s)", smoke_test_ ? "true" : "false");
@@ -52,18 +62,17 @@ void Duke3DComponent::setup() {
         }
     }
 
-    // Wire HUD global. For both game and smoke modes we drive swap_buffers()
-    // from the Core 1 task via platform_blit_frame(), so prevent Hud::loop()
-    // from also swapping concurrently.
-    // Access via fully qualified name — local extern inside duke3d namespace would
-    // resolve to esphome::duke3d::global_hud_instance instead of esphome::hud::.
+    sync_events_ = xEventGroupCreate();
+    if (!sync_events_) {
+        ESP_LOGE(TAG, "xEventGroupCreate failed");
+        mark_failed();
+        return;
+    }
+
     global_hud = esphome::hud::global_hud_instance;
-    // Only disable HUD's own swap loop if we are actually going to drive frames
-    // from a dedicated task (game or smoke). Otherwise the display will stay
-    // on the HUB75 driver's diagnostic pattern.
     if (global_hud) global_hud->set_game_running(true);
 
-    instance_ = this;
+    g_duke3d_component = this;
     input_init();
 
     if (usb_gamepad_) {
@@ -80,16 +89,14 @@ void Duke3DComponent::setup() {
              heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 
     const int stack = smoke_test_ ? SMOKE_TASK_STACK : TASK_STACK;
-    // Allocate task stack from PSRAM — internal DRAM is fragmented after WiFi+SD+HUB75 DMA.
-    // PSRAM has ~220KB free; internal only has ~72KB in small fragments.
     BaseType_t rc = xTaskCreatePinnedToCoreWithCaps(
         smoke_test_ ? smoke_task : game_task,
         smoke_test_ ? "duke3d_smoke" : "duke3d",
         stack,
         this,
-        5,      // priority — below HUB-75 ISR (which must be highest)
+        5,
         &task_handle_,
-        1,      // Core 1
+        1,
         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT
     );
     if (rc != pdPASS) {
@@ -104,11 +111,34 @@ void Duke3DComponent::loop() {
     if (!pause_wifi_) return;
 
     const uint32_t now_s = (uint32_t)(esp_timer_get_time() / 1000000ULL);
+    const int64_t now_us = esp_timer_get_time();
 
+    // --- Phase 1: keep WiFi up until Home Assistant / API have had time to push state ---
+    if (!bootstrap_released_) {
+        wifi_ap_record_t ap{};
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+            if (first_wifi_connected_at_us_ == 0) first_wifi_connected_at_us_ = now_us;
+        }
+        const bool grace_ok =
+            first_wifi_connected_at_us_ != 0 &&
+            (now_us - first_wifi_connected_at_us_) >=
+                (int64_t)wifi_bootstrap_grace_s_ * 1000000LL;
+        const bool timeout = now_us >= 120000000LL;  // 120 s absolute cap
+
+        if (grace_ok || timeout) {
+            xEventGroupSetBits(sync_events_, DUKE3D_BOOTSTRAP_OK);
+            bootstrap_released_ = true;
+            ESP_LOGI(TAG, "Bootstrap: released (grace=%s)", grace_ok ? "yes" : "no (timeout)");
+        }
+        return;
+    }
+
+    // --- Phase 2: cooperative HA sync on non-demo level loads (debounced) ---
     switch (wifi_state_) {
         case WifiWindowState::STOPPED:
-            if (now_s - last_wifi_window_s_ >= wifi_interval_s_) {
-                ESP_LOGI(TAG, "WiFi window: requesting game suspend");
+            if (ha_sync_pending_) {
+                ha_sync_pending_ = false;
+                ESP_LOGI(TAG, "HA sync: requesting game suspend");
                 g_wifi_window_requested = true;
                 wifi_state_ = WifiWindowState::REQUESTING_SUSPEND;
             }
@@ -116,7 +146,7 @@ void Duke3DComponent::loop() {
 
         case WifiWindowState::REQUESTING_SUSPEND:
             if (task_handle_ && eTaskGetState(task_handle_) == eSuspended) {
-                ESP_LOGI(TAG, "WiFi window: game suspended, starting WiFi");
+                ESP_LOGI(TAG, "HA sync: game suspended, starting WiFi");
                 esp_wifi_start();
                 wifi_window_start_s_ = now_s;
                 wifi_state_ = WifiWindowState::WIFI_UP;
@@ -125,11 +155,11 @@ void Duke3DComponent::loop() {
 
         case WifiWindowState::WIFI_UP:
             if (now_s - wifi_window_start_s_ >= WIFI_WINDOW_DURATION_S) {
-                ESP_LOGI(TAG, "WiFi window: closing, resuming game");
+                ESP_LOGI(TAG, "HA sync: closing, resuming game");
                 esp_wifi_stop();
                 g_wifi_window_requested = false;
                 if (task_handle_) vTaskResume(task_handle_);
-                last_wifi_window_s_ = now_s;
+                last_ha_sync_completed_us_ = esp_timer_get_time();
                 wifi_state_ = WifiWindowState::STOPPED;
             }
             break;
@@ -139,23 +169,30 @@ void Duke3DComponent::loop() {
 void Duke3DComponent::game_task(void* arg) {
     auto* self = static_cast<Duke3DComponent*>(arg);
 
-    // Register with TWDT so watchdog does not reset us
     esp_task_wdt_add(nullptr);
 
     if (self->pause_wifi_) {
+        ESP_LOGI(TAG, "Waiting for bootstrap (WiFi + HA data) before stopping WiFi…");
+        const EventBits_t bits =
+            xEventGroupWaitBits(self->sync_events_, DUKE3D_BOOTSTRAP_OK, pdTRUE, pdFALSE, pdMS_TO_TICKS(125000));
+        if ((bits & DUKE3D_BOOTSTRAP_OK) == 0) {
+            ESP_LOGW(TAG, "Bootstrap wait timed out — continuing");
+        }
         printf("[duke3d] stopping WiFi to free PSRAM for tile cache\n");
         esp_wifi_stop();
         vTaskDelay(pdMS_TO_TICKS(500));
     }
 
-    // Set game data directory to SD card mount point.
-    // The engine uses open("DUKE3D.GRP", ...) with relative paths; -game_dir tells
-    // it where to look. GRP file must be at /sdcard/DUKE3D.GRP (case-insensitive).
-    strncpy(self->current_demo_, "DEMO1.DMO", sizeof(self->current_demo_) - 1);
+    const int pick = (int)(esp_random() % (uint32_t)NUM_SHAREWARE_DEMOS);
+    strncpy(self->current_demo_, SHAREWARE_DEMOS[pick], sizeof(self->current_demo_) - 1);
+    self->current_demo_[sizeof(self->current_demo_) - 1] = '\0';
+    ESP_LOGI(TAG, "Random demo: %s", self->current_demo_);
+
+    char demo_arg[40];
+    snprintf(demo_arg, sizeof(demo_arg), "/d%s", self->current_demo_);
+
     ESP_LOGI(TAG, "Starting Duke3D engine (game_dir=/sdcard/duke3d)");
 
-    // Build tile cache from GRP on first boot (or when GRP changes).
-    // Subsequent boots just validate the header (~1ms) and skip the build.
     if (self->tile_cache_) {
         printf("[duke3d] calling tilecache_build_if_needed\n");
         bool tc_built = tilecache_build_if_needed("/sdcard/duke3d/DUKE3D.GRP",
@@ -167,15 +204,12 @@ void Duke3DComponent::game_task(void* arg) {
         printf("[duke3d] tile_cache disabled — loading tiles directly from GRP\n");
     }
 
-    // Engine argv: -game_dir /sdcard/duke3d /nm(no music) /ns(no sound) /dDEMO1.DMO
-    // game_dir default is already patched to /sdcard/duke3d in cache.c, but passing
-    // -game_dir here keeps checkcommandline consistent for any other path resolution.
     char* argv[] = {
         (char*)"duke3d",
         (char*)"-game_dir", (char*)"/sdcard/duke3d",
         (char*)"/nm",
         (char*)"/ns",
-        (char*)"/dDEMO1.DMO",
+        demo_arg,
         nullptr
     };
     duke3d_main(6, argv);
@@ -193,18 +227,13 @@ void Duke3DComponent::smoke_task(void* arg) {
 
     strncpy(self->current_demo_, "SMOKE", sizeof(self->current_demo_) - 1);
 
-    // Register with TWDT; we feed it via platform_blit_frame → esp_task_wdt_reset().
     esp_task_wdt_add(nullptr);
 
-    // 320x200 framebuffer — same size as the real engine's SDL surface.
-    // Allocated from PSRAM (same as SDL_CreateRGBSurface does in the real game).
-    // platform_blit_frame() will downscale this 5:1 to 64x40 exactly as the game does.
     constexpr int SRC_W = 320;
     constexpr int SRC_H = 200;
-    constexpr size_t FB_SIZE  = SRC_W * SRC_H;  // 64000 bytes
+    constexpr size_t FB_SIZE  = SRC_W * SRC_H;
     constexpr size_t PAL_SIZE = 256 * 3;
 
-    // Try PSRAM first; fall back to internal only if PSRAM init failed.
     auto* fb = static_cast<uint8_t*>(heap_caps_malloc(FB_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (!fb) fb = static_cast<uint8_t*>(heap_caps_malloc(FB_SIZE, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     auto* pal = static_cast<uint8_t*>(heap_caps_malloc(PAL_SIZE, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
@@ -218,7 +247,6 @@ void Duke3DComponent::smoke_task(void* arg) {
     ESP_LOGI(TAG, "smoke_task: fb=%p (PSRAM=%d)", (void*)fb,
              esp_ptr_external_ram(fb) ? 1 : 0);
 
-    // Vivid 3-segment spectrum: R→G, G→B, B→R — every index is a bright saturated colour.
     for (int i = 0; i < 256; i++) {
         const int seg = (i * 3) / 256;
         const int v   = (i * 3) % 256;
@@ -232,18 +260,13 @@ void Duke3DComponent::smoke_task(void* arg) {
         }
     }
 
-    // Start at t=85 → palette[85]=(0,255,0)=GREEN, immediately distinct from
-    // the hub75 driver's red/blue diagnostic pattern shown before we take over.
     int t = 85;
     int64_t last_log_us = esp_timer_get_time();
     while (true) {
-        // Fill background using a real engine routine from fixedPoint_math.c.
         const uint8_t bg = (uint8_t)(t & 0xFF);
         const uint32_t raw = (uint32_t)bg | ((uint32_t)bg << 8) | ((uint32_t)bg << 16) | ((uint32_t)bg << 24);
         clearbufbyte(fb, FB_SIZE, (int32_t)raw);
 
-        // Moving box in complementary colour (~180° opposite on the palette wheel).
-        // In 320x200 space → downscales to ~20x12 on the 64x40 display.
         const uint8_t box_idx = (uint8_t)((t + 128) & 0xFF);
         const int box_w = 100, box_h = 60;
         const int ox = (t * 10) % (SRC_W - box_w);
@@ -252,17 +275,11 @@ void Duke3DComponent::smoke_task(void* arg) {
             uint8_t* row = fb + (oy + y) * SRC_W + ox;
             for (int x = 0; x < box_w; x++) row[x] = box_idx;
         }
-        // Diagonal stripe across full 320x200.
         for (int i = 0; i < SRC_H; i++) {
             const int x = (i + (t * 15)) % SRC_W;
             fb[i * SRC_W + x] = (uint8_t)((t + 64 + i) & 0xFF);
         }
 
-        // Hand off to the same pipeline the real engine uses:
-        //   render_frame() → 5:1 downscale to 64x40
-        //   global_hud->render() → HUD overlay on rows 40-63
-        //   swap_buffers()
-        //   esp_task_wdt_reset()
         platform_blit_frame(fb, pal);
 
         int64_t now = esp_timer_get_time();
@@ -273,9 +290,26 @@ void Duke3DComponent::smoke_task(void* arg) {
         }
 
         t++;
-        vTaskDelay(pdMS_TO_TICKS(33));  // ~30 fps
+        vTaskDelay(pdMS_TO_TICKS(33));
     }
+}
+
+void Duke3DComponent::queue_ha_sync_if_eligible(uint8_t g_mode) {
+    if (!pause_wifi_) return;
+    if ((g_mode & DUKE3D_MODE_DEMO) != 0) return;
+
+    const int64_t now = esp_timer_get_time();
+    if (last_ha_sync_completed_us_ != 0 &&
+        (now - last_ha_sync_completed_us_) < (int64_t) wifi_sync_min_interval_s_ * 1000000LL) {
+        return;
+    }
+    ha_sync_pending_ = true;
+    ESP_LOGI(TAG, "Level loaded (non-demo): queued HA WiFi sync");
 }
 
 }  // namespace duke3d
 }  // namespace esphome
+
+extern "C" void duke3d_notify_level_enter(uint8_t g_mode) {
+    if (g_duke3d_component != nullptr) g_duke3d_component->queue_ha_sync_if_eligible(g_mode);
+}

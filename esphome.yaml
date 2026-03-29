@@ -69,9 +69,15 @@ duke3d:
   id: game_engine
   smoke_test: false
   usb_gamepad: false   # false = keep USB as JTAG/CDC debug interface
-  tile_cache: true      # enable now that Initcache can use 512 KB with WiFi stopped
-  pause_wifi: true      # stop WiFi during gameplay, free ~350 KB PSRAM
-  wifi_interval_s: 3600 # reconnect to HA once per hour for sensor/clock updates
+  # tile_cache: pre-extracts ≤128px tiles from DUKE3D.GRP into TCACHE.BIN on SD (one-time build).
+  # At runtime loadtile() reads that flat file instead of seeking inside GRP/ART — fewer SD hits,
+  # less stutter. Extra PSRAM helps engine heaps (Initcache); this is separate I/O optimization.
+  tile_cache: true
+  pause_wifi: true
+  # Seconds after STA associates before WiFi is stopped (HA API + sensors can update).
+  wifi_bootstrap_grace_s: 12
+  # Min seconds between HA WiFi syncs triggered by non-demo level loads (debounce).
+  wifi_sync_min_interval_s: 90
 
 # Matrix Portal S3 GPIO strip: A1=GPIO3, A2=GPIO9, A3=GPIO10, A4=GPIO11, TX=GPIO18, RX=GPIO8
 # JST 3-pin connector: A0=GPIO12
@@ -169,11 +175,6 @@ text_sensor:
     on_value:
       then:
         - lambda: id(hud_display)->set_tide_low(std::string(x.c_str()));
-  - platform: template
-    id: duke3d_demo
-    name: "Duke3D Current Demo"
-    lambda: return std::string(id(game_engine)->current_demo());
-    update_interval: 10s
   - platform: template
     id: hub75_status
     name: "Hub75 Init Status"
