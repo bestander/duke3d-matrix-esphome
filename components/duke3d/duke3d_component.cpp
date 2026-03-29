@@ -109,12 +109,16 @@ void Duke3DComponent::game_task(void* arg) {
 
     // Build tile cache from GRP on first boot (or when GRP changes).
     // Subsequent boots just validate the header (~1ms) and skip the build.
-    printf("[duke3d] calling tilecache_build_if_needed\n");
-    bool tc_built = tilecache_build_if_needed("/sdcard/duke3d/DUKE3D.GRP",
-                                              "/sdcard/duke3d/TCACHE.BIN");
-    printf("[duke3d] tilecache_build_if_needed returned %d\n", (int)tc_built);
-    bool tc_open = tilecache_open("/sdcard/duke3d/TCACHE.BIN");
-    printf("[duke3d] tilecache_open returned %d\n", (int)tc_open);
+    if (self->tile_cache_) {
+        printf("[duke3d] calling tilecache_build_if_needed\n");
+        bool tc_built = tilecache_build_if_needed("/sdcard/duke3d/DUKE3D.GRP",
+                                                  "/sdcard/duke3d/TCACHE.BIN");
+        printf("[duke3d] tilecache_build_if_needed returned %d\n", (int)tc_built);
+        bool tc_open = tilecache_open("/sdcard/duke3d/TCACHE.BIN");
+        printf("[duke3d] tilecache_open returned %d\n", (int)tc_open);
+    } else {
+        printf("[duke3d] tile_cache disabled — loading tiles directly from GRP\n");
+    }
 
     // Engine argv: -game_dir /sdcard/duke3d /nm(no music) /ns(no sound) /dDEMO1.DMO
     // game_dir default is already patched to /sdcard/duke3d in cache.c, but passing

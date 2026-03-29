@@ -8,15 +8,16 @@
 
 // Must match MAXTILES in build.h and MAX_TILE_DIM in tiles.c.
 #define TC_MAXTILES    9216
-// 64 pixels matches the HUB75 display width — the maximum detail the display
-// can show for a full-width tile.  Downscaling to 32 made menus/title screens
-// unrecognizable (256→32 = 64× reduction); 64 keeps quality while still
-// reducing large tiles 16× vs the original GRP.
-#define TC_MAX_DIM     64
-// "TCBUILD!" written at start of do_build; overwritten with "TCACHE03" only
+// Tiles at or below this dimension are cached at native resolution (no
+// downscaling).  Tiles larger than TC_MAX_DIM are skipped — they fall back to
+// the original GRP path at runtime, which is slower but preserves quality.
+// 128 covers virtually all wall textures and sprites in Duke3D; only
+// full-screen art (320×200 title/menu tiles) falls through to the GRP.
+#define TC_MAX_DIM     128
+// "TCBUILD!" written at start of do_build; overwritten with "TCACHE04" only
 // after the entry table has been successfully committed.  A file with
 // "TCBUILD!" magic is treated as corrupt by tilecache_build_if_needed().
-#define TC_MAGIC_OK    "TCACHE03"   // bumped from 02: increased TC_MAX_DIM 32→64
+#define TC_MAGIC_OK    "TCACHE04"   // bumped from 03: native resolution, no downscaling
 #define TC_MAGIC_WIP   "TCBUILD!"
 // File layout: [8B magic][4B grp_size][4B reserved][TC_MAXTILES*4B entries][pixel data]
 #define TC_HEADER_SIZE (16 + TC_MAXTILES * 4)
@@ -141,7 +142,7 @@ static bool do_build(const char *grp_path, const char *cache_path, uint32_t grp_
 
     uint32_t data_off  = (uint32_t)TC_HEADER_SIZE;
     uint32_t built     = 0;
-    uint8_t  out[TC_MAX_DIM * TC_MAX_DIM];   // 4 KB — downsampled output (64×64)
+    uint32_t skipped   = 0;
 
     for (uint32_t fi = 0; fi < num_files; fi++) {
         if (!name_is_art(names[fi])) {
@@ -180,36 +181,19 @@ static bool do_build(const char *grp_path, const char *cache_path, uint32_t grp_
                 continue;
             }
 
-            fread(tmp, 1, w * h, fp_g);
-
-            // Compute downscaled dimensions (power-of-2 halving)
-            int nw = w, nh = h;
-            while (nw > TC_MAX_DIM) nw >>= 1;
-            while (nh > TC_MAX_DIM) nh >>= 1;
-            if (nw < 1) nw = 1;
-            if (nh < 1) nh = 1;
-
-            const uint8_t *wbuf;
-            int wsz;
-            if (nw == w && nh == h) {
-                wbuf = tmp;
-                wsz  = w * h;
-            } else {
-                // Nearest-neighbour, column-major (index = x*h + y)
-                for (int x = 0; x < nw; x++) {
-                    int sx = (x * w) / nw;
-                    for (int y = 0; y < nh; y++) {
-                        int sy = (y * h) / nh;
-                        out[x * nh + y] = tmp[sx * h + sy];
-                    }
-                }
-                wbuf = out;
-                wsz  = nw * nh;
+            // Tiles larger than TC_MAX_DIM are skipped — they fall back to the
+            // GRP at runtime.  This preserves full quality for all cached tiles.
+            if (w > TC_MAX_DIM || h > TC_MAX_DIM) {
+                fseek(fp_g, w * h, SEEK_CUR);
+                skipped++;
+                continue;
             }
 
-            fwrite(wbuf, 1, wsz, fp_c);
-            entries[pic] = TC_MAKE(tc_ilog2(nw), tc_ilog2(nh), data_off);
-            data_off += (uint32_t)wsz;
+            // Store tile at native resolution — no downscaling.
+            fread(tmp, 1, w * h, fp_g);
+            fwrite(tmp, 1, w * h, fp_c);
+            entries[pic] = TC_MAKE(tc_ilog2(w), tc_ilog2(h), data_off);
+            data_off += (uint32_t)(w * h);
             built++;
         }
     }
@@ -236,8 +220,8 @@ static bool do_build(const char *grp_path, const char *cache_path, uint32_t grp_
     fclose(fp_c);
     fclose(fp_g);
 
-    printf("[tilecache] built %u tiles, %.1f KB total\n",
-           (unsigned)built, (float)data_off / 1024.0f);
+    printf("[tilecache] built %u tiles (skipped %u >%dpx), %.1f KB total\n",
+           (unsigned)built, (unsigned)skipped, TC_MAX_DIM, (float)data_off / 1024.0f);
     return true;
 }
 

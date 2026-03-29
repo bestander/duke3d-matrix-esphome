@@ -13,14 +13,16 @@ public:
     float get_setup_priority() const override { return setup_priority::LATE; }
 
     const char* current_demo() const { return current_demo_; }
-    void set_smoke_test(bool v) { smoke_test_ = v; }
+    void set_smoke_test(bool v)  { smoke_test_  = v; }
     void set_usb_gamepad(bool v) { usb_gamepad_ = v; }
+    void set_tile_cache(bool v)  { tile_cache_  = v; }
 
 private:
     TaskHandle_t task_handle_ = nullptr;
     char current_demo_[32] = "DEMO1.DMO";
     bool smoke_test_    = false;
     bool usb_gamepad_   = false;
+    bool tile_cache_    = true;
 
     static void game_task(void* arg);
     static void smoke_task(void* arg);

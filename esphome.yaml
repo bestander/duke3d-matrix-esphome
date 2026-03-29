@@ -69,6 +69,7 @@ duke3d:
   id: game_engine
   smoke_test: false
   usb_gamepad: false   # false = keep USB as JTAG/CDC debug interface
+  tile_cache: false     # false = load tiles directly from GRP (slower, no build step)
 
 # Matrix Portal S3 GPIO strip: A1=GPIO3, A2=GPIO9, A3=GPIO10, A4=GPIO11, TX=GPIO18, RX=GPIO8
 # JST 3-pin connector: A0=GPIO12
