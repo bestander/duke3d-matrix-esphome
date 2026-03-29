@@ -69,7 +69,9 @@ duke3d:
   id: game_engine
   smoke_test: false
   usb_gamepad: false   # false = keep USB as JTAG/CDC debug interface
-  tile_cache: false     # false = load tiles directly from GRP (slower, no build step)
+  tile_cache: true      # enable now that Initcache can use 512 KB with WiFi stopped
+  pause_wifi: true      # stop WiFi during gameplay, free ~350 KB PSRAM
+  wifi_interval_s: 3600 # reconnect to HA once per hour for sensor/clock updates
 
 # Matrix Portal S3 GPIO strip: A1=GPIO3, A2=GPIO9, A3=GPIO10, A4=GPIO11, TX=GPIO18, RX=GPIO8
 # JST 3-pin connector: A0=GPIO12

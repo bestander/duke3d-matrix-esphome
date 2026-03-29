@@ -6,6 +6,7 @@
 #include "esphome/components/hud/hud.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 #include "freertos/idf_additions.h"
 #include "esp32_hal.h"
 #include "tilecache.h"
@@ -24,6 +25,10 @@ namespace esphome { namespace hud { extern Hud* global_hud_instance; } }
 // global_hud: wires the HUD into platform_blit_frame() for per-frame overlay.
 // Declared extern in esp32_hal.cpp; defined here.
 esphome::hud::Hud* global_hud = nullptr;
+
+// Set by loop() (Core 0) to request cooperative suspension of the game task.
+// Cleared by loop() after WiFi window ends, before vTaskResume().
+volatile bool g_wifi_window_requested = false;
 
 // Engine dependency smoke-test: call a real Duke engine routine.
 // Implemented in `engine/components/Engine/fixedPoint_math.c`.
@@ -95,11 +100,53 @@ void Duke3DComponent::setup() {
     ESP_LOGI(TAG, "Duke3D %s task started on Core 1 (stack=%d)", smoke_test_ ? "smoke" : "game", stack);
 }
 
+void Duke3DComponent::loop() {
+    if (!pause_wifi_) return;
+
+    const uint32_t now_s = (uint32_t)(esp_timer_get_time() / 1000000ULL);
+
+    switch (wifi_state_) {
+        case WifiWindowState::STOPPED:
+            if (now_s - last_wifi_window_s_ >= wifi_interval_s_) {
+                ESP_LOGI(TAG, "WiFi window: requesting game suspend");
+                g_wifi_window_requested = true;
+                wifi_state_ = WifiWindowState::REQUESTING_SUSPEND;
+            }
+            break;
+
+        case WifiWindowState::REQUESTING_SUSPEND:
+            if (task_handle_ && eTaskGetState(task_handle_) == eSuspended) {
+                ESP_LOGI(TAG, "WiFi window: game suspended, starting WiFi");
+                esp_wifi_start();
+                wifi_window_start_s_ = now_s;
+                wifi_state_ = WifiWindowState::WIFI_UP;
+            }
+            break;
+
+        case WifiWindowState::WIFI_UP:
+            if (now_s - wifi_window_start_s_ >= WIFI_WINDOW_DURATION_S) {
+                ESP_LOGI(TAG, "WiFi window: closing, resuming game");
+                esp_wifi_stop();
+                g_wifi_window_requested = false;
+                if (task_handle_) vTaskResume(task_handle_);
+                last_wifi_window_s_ = now_s;
+                wifi_state_ = WifiWindowState::STOPPED;
+            }
+            break;
+    }
+}
+
 void Duke3DComponent::game_task(void* arg) {
     auto* self = static_cast<Duke3DComponent*>(arg);
 
     // Register with TWDT so watchdog does not reset us
     esp_task_wdt_add(nullptr);
+
+    if (self->pause_wifi_) {
+        printf("[duke3d] stopping WiFi to free PSRAM for tile cache\n");
+        esp_wifi_stop();
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
 
     // Set game data directory to SD card mount point.
     // The engine uses open("DUKE3D.GRP", ...) with relative paths; -game_dir tells
@@ -132,6 +179,10 @@ void Duke3DComponent::game_task(void* arg) {
         nullptr
     };
     duke3d_main(6, argv);
+    if (self->pause_wifi_) {
+        printf("[duke3d] game exited — restarting WiFi\n");
+        esp_wifi_start();
+    }
     tilecache_close();
     ESP_LOGI(TAG, "Duke3D engine exited");
     vTaskDelete(nullptr);

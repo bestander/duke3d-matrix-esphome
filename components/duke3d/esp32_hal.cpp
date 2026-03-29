@@ -14,6 +14,8 @@
 // It is declared extern here so platform_blit_frame can overlay the HUD each frame.
 extern esphome::hud::Hud* global_hud;
 
+extern volatile bool g_wifi_window_requested;
+
 // ---------------------------------------------------------------------------
 // spi_lcd shim — replaces engine/components/SDL/spi_lcd.c
 //
@@ -91,6 +93,12 @@ void spi_lcd_send_boarder(uint16_t *scr, int /*border*/) {
                (long long)t_blit_us,
                (unsigned)hwm);
     }
+
+    if (g_wifi_window_requested) {
+        printf("[duke3d] suspending for WiFi window\n");
+        vTaskSuspend(NULL);
+        printf("[duke3d] resumed after WiFi window\n");
+    }
 }
 
 } // extern "C"
@@ -108,6 +116,12 @@ extern "C" void platform_blit_frame(const uint8_t* src, const uint8_t* pal) {
     // Feed the TWDT every frame — the game loop runs for minutes without
     // returning to ESPHome's main task, so we must reset here, not between demos.
     esp_task_wdt_reset();
+
+    if (g_wifi_window_requested) {
+        printf("[duke3d] suspending for WiFi window\n");
+        vTaskSuspend(NULL);
+        printf("[duke3d] resumed after WiFi window\n");
+    }
 }
 
 extern "C" FILE* platform_open_file(const char* rel_path, const char* mode) {
