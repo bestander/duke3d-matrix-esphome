@@ -16,3 +16,6 @@ extern "C" FILE* platform_open_file(const char* rel_path, const char* mode);
 // Called by engine's audio layer — stub until Phase 7.
 // n: number of int16_t samples (both channels combined).
 extern "C" void platform_audio_write(const int16_t* pcm, int n);
+
+// Output gain before I2S: percent of full scale (0 = mute, 100 = unity). Set from ESPHome duke3d config.
+extern "C" void platform_set_audio_output_percent(unsigned percent);

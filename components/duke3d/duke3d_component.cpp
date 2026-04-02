@@ -10,6 +10,9 @@
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
+#ifdef USE_WIFI
+#include "esphome/components/wifi/wifi_component.h"
+#endif
 #include "freertos/idf_additions.h"
 #include "esp32_hal.h"
 #include "tilecache.h"
@@ -95,7 +98,29 @@ bool pick_random_demo_dmo(const char* game_dir, char* out, size_t out_sz) {
 
 }  // namespace
 
+#ifdef USE_WIFI
+/** Tell ESPHome WiFi is off so its loop() does not fight us with reconnect (SD/audio). */
+static void duke3d_wifi_radio_off() {
+    if (::esphome::wifi::global_wifi_component != nullptr) {
+        ::esphome::wifi::global_wifi_component->disable();
+    } else {
+        esp_wifi_stop();
+    }
+}
+static void duke3d_wifi_radio_on() {
+    if (::esphome::wifi::global_wifi_component != nullptr) {
+        ::esphome::wifi::global_wifi_component->enable();
+    } else {
+        esp_wifi_start();
+    }
+}
+#else
+static void duke3d_wifi_radio_off() { esp_wifi_stop(); }
+static void duke3d_wifi_radio_on() { esp_wifi_start(); }
+#endif
+
 void Duke3DComponent::setup() {
+    platform_set_audio_output_percent((unsigned)audio_output_percent_);
     ESP_LOGI(TAG, "setup(smoke_test=%s)", smoke_test_ ? "true" : "false");
     if (!smoke_test_) {
         auto* sd = sd_card::global_sd_card;
@@ -184,6 +209,8 @@ void Duke3DComponent::loop() {
         return;
     }
 
+    if (!wifi_ha_sync_) return;
+
     // --- Phase 2: cooperative HA sync on non-demo level loads (debounced) ---
     switch (wifi_state_) {
         case WifiWindowState::STOPPED:
@@ -198,7 +225,7 @@ void Duke3DComponent::loop() {
         case WifiWindowState::REQUESTING_SUSPEND:
             if (task_handle_ && eTaskGetState(task_handle_) == eSuspended) {
                 ESP_LOGI(TAG, "HA sync: game suspended, starting WiFi");
-                esp_wifi_start();
+                duke3d_wifi_radio_on();
                 wifi_window_start_s_ = now_s;
                 wifi_state_ = WifiWindowState::WIFI_UP;
             }
@@ -207,7 +234,7 @@ void Duke3DComponent::loop() {
         case WifiWindowState::WIFI_UP:
             if (now_s - wifi_window_start_s_ >= WIFI_WINDOW_DURATION_S) {
                 ESP_LOGI(TAG, "HA sync: closing, resuming game");
-                esp_wifi_stop();
+                duke3d_wifi_radio_off();
                 g_wifi_window_requested = false;
                 if (task_handle_) vTaskResume(task_handle_);
                 last_ha_sync_completed_us_ = esp_timer_get_time();
@@ -230,7 +257,7 @@ void Duke3DComponent::game_task(void* arg) {
             ESP_LOGW(TAG, "Bootstrap wait timed out — continuing");
         }
         printf("[duke3d] stopping WiFi to free PSRAM for tile cache\n");
-        esp_wifi_stop();
+        duke3d_wifi_radio_off();
         vTaskDelay(pdMS_TO_TICKS(500));
     }
 
@@ -281,7 +308,7 @@ void Duke3DComponent::game_task(void* arg) {
     duke3d_main(5, argv);
     if (self->pause_wifi_) {
         printf("[duke3d] game exited — restarting WiFi\n");
-        esp_wifi_start();
+        duke3d_wifi_radio_on();
     }
     tilecache_close();
     ESP_LOGI(TAG, "Duke3D engine exited");
@@ -361,7 +388,7 @@ void Duke3DComponent::smoke_task(void* arg) {
 }
 
 void Duke3DComponent::queue_ha_sync_if_eligible(uint8_t g_mode) {
-    if (!pause_wifi_) return;
+    if (!pause_wifi_ || !wifi_ha_sync_) return;
     if ((g_mode & DUKE3D_MODE_DEMO) != 0) return;
 
     const int64_t now = esp_timer_get_time();

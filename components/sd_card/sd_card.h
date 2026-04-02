@@ -16,6 +16,10 @@ public:
     void set_miso(int p) { miso_ = p; }
     void set_sck(int p)  { sck_  = p; }
     void set_cs(int p)   { cs_   = p; }
+    /// Log sequential + random read timings once after mount (uses duke3d/DUKE3D.GRP).
+    void set_benchmark(bool v) { benchmark_ = v; }
+    /// Log every read-capable open() under /sdcard via wrapped _open_r (tag sd_open).
+    void set_open_trace(bool v) { open_trace_ = v; }
 
     void setup() override;
     float get_setup_priority() const override { return setup_priority::IO; }
@@ -29,8 +33,12 @@ public:
     bool grp_present() const;
 
 private:
+    void run_io_benchmark_() const;
+
     int mosi_ = -1, miso_ = -1, sck_ = -1, cs_ = -1;
     bool mounted_ = false;
+    bool benchmark_{false};
+    bool open_trace_{false};
     sdmmc_card_t* card_ = nullptr;
 };
 

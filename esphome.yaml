@@ -10,6 +10,8 @@ esphome:
     lib_deps:
       - symlink:///Users/konstantinraev/work/duke3d-matrix-esphome/libs/ESP32-HUB75-MatrixPanel-I2S-DMA
     build_flags:
+      # Log /sdcard read opens (sd_open_trace.c __wrap__open_r); pair with sd_card open_trace: true
+      - -Wl,--wrap=_open_r
       - -I/Users/konstantinraev/work/duke3d-matrix-esphome/libs/ESP32-HUB75-MatrixPanel-I2S-DMA/src
       # Duke engine includes (for platform.h -> esp32_compat.h)
       - -I/Users/konstantinraev/work/duke3d-matrix-esphome/components/duke3d
@@ -54,6 +56,10 @@ esp32:
       # Extend interrupt watchdog timeout — E4L11 level load takes up to 15s of
       # sequential SD card reads during docacheit(); default 300ms is far too short.
       CONFIG_ESP_INT_WDT_TIMEOUT_MS: "15000"
+      # FatFs: max wait to acquire file/volume mutex. Under heavy concurrent SD
+      # (game + streaming prefetch), the default 10s can still surface as errno 116
+      # (ETIMEDOUT) on fseek/fread; bump if logs show prefetch fseek/read failures.
+      CONFIG_FATFS_TIMEOUT_MS: "30000"
 
 external_components:
   - source:
@@ -71,6 +77,8 @@ hud:
 
 duke3d:
   id: game_engine
+  # I2S output scale: 0 = mute, 100 = full mixer level (default 50 ≈ previous half-volume trim).
+  audio_output_percent: 10
   # Wait for HA time sync before stopping WiFi at boot; otherwise clock stays 00:00 and sensors may not arrive.
   time_id: ha_time
   smoke_test: false
@@ -82,6 +90,8 @@ duke3d:
   pause_wifi: true
   # Minimum seconds after WiFi associates; bootstrap also waits for time_id to be valid (unless 120s cap).
   wifi_bootstrap_grace_s: 8
+  # Do not start WiFi during gameplay for HA refresh — avoids SPI/SD contention with streamed audio/tiles.
+  wifi_ha_sync: false
   # Min seconds between HA WiFi syncs triggered by non-demo level loads (debounce).
   wifi_sync_min_interval_s: 90
 
@@ -96,11 +106,13 @@ i2s_audio:
   din_pin:   18   # TX
 
 sd_card:
-  id: sdcard
+  id: sdcarddp 
   mosi_pin: 3    # A1
   miso_pin: 9    # A2
   clk_pin:  10   # A3
   cs_pin:   11   # A4
+  benchmark: true  # logs sequential + random SD read stats once at boot (uses duke3d/DUKE3D.GRP)
+  open_trace: true   # set true: log every read-capable open under /sdcard (tag sd_open); very noisy
 
 wifi:
   ssid: !secret wifi_ssid

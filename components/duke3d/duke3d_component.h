@@ -23,6 +23,10 @@ public:
     void set_pause_wifi(bool v) { pause_wifi_ = v; }
     void set_wifi_bootstrap_grace_s(uint32_t v) { wifi_bootstrap_grace_s_ = v; }
     void set_wifi_sync_min_interval_s(uint32_t v) { wifi_sync_min_interval_s_ = v; }
+    /// When false, never start WiFi during gameplay for HA refresh (keeps SD/SPI free).
+    void set_wifi_ha_sync(bool v) { wifi_ha_sync_ = v; }
+    /// I2S output gain 0–100 (% of full scale). Applied in platform_audio_write.
+    void set_audio_output_percent(uint8_t v) { audio_output_percent_ = v > 100 ? 100 : v; }
     /// If set, bootstrap keeps WiFi up until `now().is_valid()` (HA time synced), not just grace_s.
     void set_time_id(time::RealTimeClock *t) { time_id_ = t; }
 
@@ -41,6 +45,8 @@ private:
     bool pause_wifi_ = false;
     uint32_t wifi_bootstrap_grace_s_ = 12;
     uint32_t wifi_sync_min_interval_s_ = 90;
+    bool wifi_ha_sync_ = true;
+    uint8_t audio_output_percent_ = 50;
     time::RealTimeClock *time_id_{nullptr};
     bool bootstrap_released_ = false;
     int64_t first_wifi_connected_at_us_ = 0;

@@ -4,10 +4,13 @@
 #include "esphome/components/hud/hud.h"
 #include "esphome/components/sd_card/sd_card.h"
 #include "esphome/components/i2s_audio/i2s_audio.h"
+#include "mv_stream.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <atomic>
+#include <cstdio>
 #include <stdint.h>
 
 // global_hud is defined in duke3d_component.cpp and set during Duke3DComponent::setup().
@@ -15,6 +18,8 @@
 extern esphome::hud::Hud* global_hud;
 
 extern volatile bool g_wifi_window_requested;
+
+static std::atomic<unsigned> g_audio_output_percent{50u};
 
 // ---------------------------------------------------------------------------
 // spi_lcd shim — replaces engine/components/SDL/spi_lcd.c
@@ -86,14 +91,26 @@ void spi_lcd_send_boarder(uint16_t *scr, int /*border*/) {
     last_frame_us = now;
 
     if (frame_count % 30 == 0) {
+        static uint32_t last_stream_und = 0, last_stream_ps = 0;
+        uint32_t su = MV_StreamUnderrunTotal();
+        uint32_t sp = MV_StreamPrefetchShortTotal();
+        unsigned su_d = (unsigned)(su - last_stream_und);
+        unsigned sp_d = (unsigned)(sp - last_stream_ps);
+        last_stream_und = su;
+        last_stream_ps = sp;
+
         UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
         int fps = (total_frame_us > 0) ? (int)(1000000 / total_frame_us) : 0;
-        printf("[F%d] fps≈%d  frame=%lldms  SD: %ld loads %ld bytes in %lldms  blit=%lldus  stack=%u\n",
+        char snd[56] = "";
+        if (su_d > 0U || sp_d > 0U) {
+            snprintf(snd, sizeof(snd), "  sound: und+%u sh+%u", su_d, sp_d);
+        }
+        printf("[F%d] fps≈%d  frame=%lldms  SD: %ld loads %ld bytes in %lldms  blit=%lldus  stack=%u%s\n",
                frame_count, fps,
                (long long)total_frame_us / 1000,
                (long)tile_loads, (long)tile_bytes, (long long)tile_us / 1000,
                (long long)t_blit_us,
-               (unsigned)hwm);
+               (unsigned)hwm, snd);
     }
 
     if (g_wifi_window_requested) {
@@ -128,6 +145,12 @@ extern "C" void platform_blit_frame(const uint8_t* src, const uint8_t* pal) {
     }
 }
 
+extern "C" void platform_set_audio_output_percent(unsigned percent) {
+    if (percent > 100u)
+        percent = 100u;
+    g_audio_output_percent.store(percent, std::memory_order_relaxed);
+}
+
 extern "C" FILE* platform_open_file(const char* rel_path, const char* mode) {
     auto* sd = esphome::sd_card::global_sd_card;
     if (!sd || !sd->is_mounted()) return nullptr;
@@ -139,11 +162,19 @@ extern "C" void platform_audio_write(const int16_t* pcm, int n) {
     if (!audio || n <= 0) return;
     // pcm is mono at 11025 Hz; I2S is configured stereo, so duplicate L=R.
     // n is at most MixBufferSize=256 samples; 512 int16 stereo = 1 KB stack.
+    // Gain from ESPHome `duke3d.audio_output_percent` (0–100).
     if (n > 256) n = 256;
+    const unsigned pct = g_audio_output_percent.load(std::memory_order_relaxed);
     int16_t stereo[512];
     for (int i = 0; i < n; i++) {
-        stereo[i * 2]     = pcm[i];
-        stereo[i * 2 + 1] = pcm[i];
+        int32_t s = ((int32_t)pcm[i] * (int32_t)pct) / 100;
+        if (s > 32767)
+            s = 32767;
+        else if (s < -32768)
+            s = -32768;
+        int16_t o = (int16_t)s;
+        stereo[i * 2]     = o;
+        stereo[i * 2 + 1] = o;
     }
     audio->write_pcm(stereo, n * 2 * (int)sizeof(int16_t));
 }
