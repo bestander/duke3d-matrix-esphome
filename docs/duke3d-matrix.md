@@ -364,6 +364,103 @@ Any cache region containing even a single lock≥200 block is marked maximally e
 
 ---
 
+## Proposal: SD-streaming sound voices
+
+### Motivation
+
+Current approach buffers entire sound files in PSRAM (`heap_caps_malloc SPIRAM`). With ~275 KB available after tile cache, large sounds (40–44 KB each) exhaust the budget quickly. The MGM240 Duke3D port ([next-hack/MGM240_DukeNukem3D](https://github.com/next-hack/MGM240_DukeNukem3D)) solves this on 256 KB total RAM (no PSRAM at all) by **never copying sound data to RAM**. Each voice holds only a flash pointer + read position; per-mix-period it DMA-reads exactly the bytes needed for that window, mixes them, and discards them.
+
+We can apply the same principle with SD card reads instead of SPI flash.
+
+### SD card throughput
+
+Current setup: SPI mode, `max_freq_khz = 20000` (20 MHz, the SDSPI driver ceiling). Actual SD SPI throughput is ~1–2 MB/s after FAT overhead and per-transaction SPI setup.
+
+Audio demand per mix period (23 ms at 11025 Hz / 256 samples):
+- 256 samples × 8-bit mono = **256 bytes per voice per period**
+- 8 voices = **2048 bytes total per 23 ms window**
+- Required read bandwidth: 2048 / 0.023 = ~89 KB/s
+
+At 1 MB/s SD throughput, 8 voices need only **~9% of available bandwidth**. Even at a pessimistic 400 KB/s, it's ~22%. The audio pump task already runs between game task sleeps; SD reads for audio are well within budget.
+
+**Can you go faster than 20 MHz?** SDSPI mode is hard-capped at 25 MHz by the SD spec and the ESP-IDF driver. We're at 20 MHz already — a faster card won't help. SDMMC (4-bit native) could reach 40 MHz but requires four dedicated GPIO data lines; the current board uses SPI with shared pins. Keeping SPI at 20 MHz is the right call.
+
+**A faster card is unlikely to help.** Modern UHS-I/Class 10 cards negotiate high speed over the CMD6/CMD19 handshake, which SDSPI mode doesn't use. The bottleneck is the SPI clock (fixed at 20 MHz), not the card. Save the swap for SDMMC mode if pins become available.
+
+### Memory savings
+
+| Approach | PSRAM for sound data |
+|----------|----------------------|
+| Current (buffered) | up to 275 KB (OOM possible) |
+| Streaming | **0 bytes** (sound data never in RAM) |
+
+Stack cost during mixing: ~4 KB per voice per mix call (256-byte read buffer + rate-conversion scratch), allocated on the audio task stack and freed immediately. Stack size for `duke_audio` task stays at 4 KB or increases to 6 KB to be safe.
+
+### Architecture
+
+```
+GRP file (SD)
+  │
+  │  per-mix-period: fread(256 bytes at voice->pos)
+  ▼
+stack buffer [256 bytes]
+  │
+  │  rate-convert + volume-scale → paintbuffer
+  ▼
+MV_MixPage buffer (existing, 512 bytes in PSRAM)
+  │
+  ▼
+platform_audio_write() → I2S DMA
+```
+
+Voice node changes:
+- Add `FILE *stream` (open file handle into GRP, seeked to sound start)
+- Add `int32_t grp_offset` (byte offset of sound's PCM data in GRP file)
+- Add `int32_t stream_pos` (current read position within sound)
+- Keep `length` (total byte length of sound)
+- Remove `ptr` (no longer needed; or keep as NULL sentinel for "not streaming")
+
+### Key implementation changes
+
+#### sounds.c
+- `loadsound()`: instead of reading the full file into PSRAM, record the GRP file offset and length in a new `SoundStream` table. No `heap_caps_malloc`.
+- `clearsoundlocks()`: close any open `FILE*` handles; no `heap_caps_free`.
+
+#### multivoc.c — `MV_ServiceVoc()` / mixing loop
+Replace the inner mix loop's pointer-arithmetic over `voice->ptr` with an `fread` of exactly `MixBufferSize` bytes from `voice->stream` at `voice->stream_pos`. After reading, advance `stream_pos`; if `stream_pos >= length`, handle loop/stop as today.
+
+The mixing loop already abstracts the source via `voice->GetSamples` function pointer — this is the right hook to add a streaming source type without touching the rate-converter.
+
+#### dsl.c
+No changes needed. The audio pump task already calls `MV_ServiceVoc()` under the `portMUX`; SD reads inside that critical section are fine since this is a single-core mutex (not a true interrupt disable) and the SD driver is re-entrant.
+
+#### GRP file handle
+The GRP file is currently opened per-read and closed in `kread()`/`kclose()`. For streaming voices we need a **persistent file handle** into the GRP kept open for the lifetime of each voice. Two options:
+1. Open a second dedicated GRP file descriptor on voice start, close on voice stop. (Simple; max 8 concurrent handles; FAT supports this.)
+2. Use a single GRP fd with per-voice `fseek` under the portMUX. (Fewer fd resources; requires serialising seeks/reads — fine since mixing is already serialised.)
+
+Option 2 is simpler. One open GRP fd is kept as a global in the audio subsystem; each voice stores its GRP offset + current position; the mix loop seeks and reads under the existing portMUX.
+
+### Risks and mitigations
+
+| Risk | Mitigation |
+|------|------------|
+| SD latency spike during mix | Read window is 256 bytes; at 20 MHz SPI this is <1 ms. Acceptable jitter. |
+| FAT seek overhead for many voices | Single GRP fd; sequential reads within a voice are consecutive bytes → minimal seek overhead after first read |
+| GRP fd lifetime | Open at sound system init, close at shutdown. Stateless between voice instances. |
+| portMUX held during SD read | portMUX is a spinlock, not an ISR disable. SD DMA completes in <1 ms. No problem on single-core. |
+| Rate mismatch (6 kHz sounds) | Stack buffer oversized by rate ratio (same as MGM240 `tsfx[4 * AUDIO_BUFFER_LENGTH]`). |
+
+### Implementation order
+
+1. Add `SoundStream` table in `sounds.c` (offset + length per sound ID); remove `heap_caps_malloc`.
+2. Add `stream_pos` field to `VoiceNode`; add streaming source type with `GetSamples` via `fread`.
+3. Open one persistent GRP fd at audio init; pass to mixing loop.
+4. Test with 8 voices; verify no OOM, verify audio quality matches current.
+5. Optionally increase voices back to 16 — streaming makes per-voice RAM cost negligible.
+
+---
+
 ## Key risks and mitigations
 
 | Risk | Mitigation |
