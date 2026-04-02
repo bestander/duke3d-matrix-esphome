@@ -5,6 +5,8 @@ esphome:
     # Hub75 library: added as lib_dep so PlatformIO compiles its sources.
     # build_flags exposes its headers to all compilation units since the
     # monolithic src/ component has no per-component REQUIRES resolution.
+    extra_scripts:
+      - pre:/Users/konstantinraev/work/duke3d-matrix-esphome/pre_build.py
     lib_deps:
       - symlink:///Users/konstantinraev/work/duke3d-matrix-esphome/libs/ESP32-HUB75-MatrixPanel-I2S-DMA
     build_flags:

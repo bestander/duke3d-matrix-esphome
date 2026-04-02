@@ -260,6 +260,110 @@ Detailed step-by-step checklists with full code snippets were folded into the re
 
 ---
 
+## Audio system
+
+### Hardware
+
+An I2S mono amplifier (e.g. MAX98357A) is wired to three GPIO pins configured in `esphome.yaml` under the `i2s_audio:` block:
+
+| Signal | GPIO (Matrix Portal S3) |
+|--------|------------------------|
+| BCLK   | A0 (GPIO12)            |
+| LRCLK  | RX (GPIO8)             |
+| DIN    | TX (GPIO18)            |
+
+### Software stack
+
+```
+Duke3D game code
+  sounds.c  ──┐
+  xyzsound()  │  FX_PlayVOC3D / FX_PlayWAV3D
+              ▼
+   Apogee Multivoc  (fx_man.c, multivoc.c, mv_mix.c, ll_man.c, pitch.c)
+        │  MV_ServiceVoc() — software mixing of up to 32 voices
+        │  produces 16-bit mono PCM at 11025 Hz, 256 samples/buffer
+        ▼
+    dsl.c  — ESP32 audio driver (FreeRTOS task, Core 1, priority 4)
+        │  vTaskDelay(23 ms) → portENTER_CRITICAL → MV_ServiceVoc
+        │  → portEXIT_CRITICAL → platform_audio_write()
+        ▼
+    esp32_hal.cpp  (platform_audio_write)
+        │  duplicates mono samples L=R into 512-byte stereo buffer
+        ▼
+    i2s_audio component  (i2s_write, ticks_to_wait=0, non-blocking)
+        ▼
+    I2S DMA → amplifier
+```
+
+### Audio driver (dsl.c)
+
+`dsl.c` replaces the original SDL_OpenAudio-based driver. It spawns a single FreeRTOS task pinned to Core 1 at priority 4 (below the game task at priority 5). Every ~23 ms it:
+
+1. Acquires a `portMUX` critical section (serialises voice-list access with the game task on the same core).
+2. Calls `MV_ServiceVoc()` to mix the next 256-sample page into `MV_MixBuffer`.
+3. Releases the critical section.
+4. Calls `platform_audio_write()` with the freshly-mixed page.
+
+`DisableInterrupts`/`RestoreInterrupts` — originally used to mask the DOS hardware timer ISR — are implemented with the same `portMUX`, so `MV_PlayVoice`/`MV_StopVoice` calls from the game task are atomic with the mixing loop.
+
+The `vTaskDelay(23 ms)` strategy means the audio task naturally gets CPU time during SD card reads (game task blocked on SPI DMA) delivering near-continuous audio with zero spinning.
+
+### Mixing parameters
+
+| Parameter | Value | Source |
+|-----------|-------|--------|
+| Sample rate | 11025 Hz | `MixRate` default in `config.c`; matches I2S driver config |
+| Voices | 32 | `NumVoices` default in `config.c` |
+| Channels | 1 (mono) | `NumChannels`; samples duplicated L=R in `platform_audio_write` |
+| Bits | 16 | `NumBits` |
+| Buffer size | 256 samples | `MixBufferSize` in Multivoc |
+| I2S DMA | 8 × 256-sample buffers = 8192 B ≈ 370 ms | `dma_buf_count=8, dma_buf_len=256` in `i2s_audio.cpp` |
+
+### Source files compiled
+
+The Apogee Multivoc library is included by `pre_build.py` via CMake `file(GLOB_RECURSE)` from `engine/components/audiolib/`. The following source files are compiled:
+
+| File | Purpose |
+|------|---------|
+| `fx_man.c` | FX_* public API |
+| `multivoc.c` | Software voice mixer |
+| `mv_mix.c` | Inner mixing loops |
+| `ll_man.c` | Low-level manager |
+| `pitch.c` | Pitch shifting |
+| `dsl.c` | ESP32 audio driver (FreeRTOS task) |
+| `user.c` | `USER_CheckParameter` — returns false on non-DOS |
+
+Excluded from the build (DOS/ISA hardware drivers, OPL2/MIDI music, duplicate symbols):
+`adlibfx`, `al_midi`, `awe32`, `blaster`, `debugio`, `dma`, `dpmi`, `gus*`, `irq`, `leetimbr`, `midi`, `mpu401`, `music`, `nomusic`, `pas16`, `sndscape`, `sndsrc`, `task_man`, `gmtimbre`, `myprint`, `usrhooks`.
+
+### Music stubs
+
+OPL2/MIDI music is not ported. `audiolib_stubs.c` provides no-op implementations of all `MUSIC_*` symbols. The game is launched with `/nm` to skip music. `PlayMusic()` is also stubbed. `music.h` is intentionally **not** included in stubs — it transitively includes `duke3d.h` which defines (not just declares) large global arrays, causing duplicate symbols and ~1.6 MB DRAM overflow.
+
+### PSRAM memory layout for audio
+
+Duke3D has up to 600 sound definitions. The engine lazily loads sound files on first play (`loadsound()` in `sounds.c`, called when `Sound[num].ptr == 0`).
+
+**Sound buffers live in PSRAM heap** (not the tile cache). `loadsound()` uses `heap_caps_malloc(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)` directly. `clearsoundlocks()` — called at every level transition and menu entry — frees all sound buffers that are not currently playing (`Sound[num].num == 0`), returning PSRAM to the heap. Sounds reload from SD on next play.
+
+Tile cache is capped at **256 KB** (reduced from 512 KB) to leave ~200 KB of PSRAM heap for concurrent sound buffers (~25 × 8 KB sounds). Tile eviction is more frequent as a result but the tile cache aging/LRU mechanism handles this transparently.
+
+### Bug: `ERROR: CACHE SPACE ALL LOCKED UP!` (fixed)
+
+**Symptom:** Game crashed mid-demo with `ERROR: CACHE SPACE ALL LOCKED UP!` after ~90 seconds of play with audio enabled.
+
+**Root cause:** Sound buffers were originally allocated from the tile cache via `allocache(&Sound[num].ptr, l, &Sound[num].lock)`. The engine uses `Sound[num].lock >= 200` as a "do not evict" marker, incrementing the lock each time a sound plays (`Sound[num].lock++`). In `allocache()`:
+
+```c
+if (*cac[zz].lock >= 200) { daval = 0x7fffffff; break; }
+```
+
+Any cache region containing even a single lock≥200 block is marked maximally expensive to evict. As sounds accumulated during a demo level, their lock≥200 blocks fragmented the 448 KB cache such that no contiguous region large enough for a new tile was free of permanently-locked blocks.
+
+**Fix:** Sound buffers were removed from the tile cache entirely. `loadsound()` now uses `heap_caps_malloc(MALLOC_CAP_SPIRAM)`. `clearsoundlocks()` explicitly frees non-playing sounds with `heap_caps_free`. The tile cache is now exclusively for tiles and can never be locked up by sound data.
+
+---
+
 ## Key risks and mitigations
 
 | Risk | Mitigation |
@@ -268,6 +372,7 @@ Detailed step-by-step checklists with full code snippets were folded into the re
 | Game vs HUB-75 timing | Separate cores; scan task priority |
 | SD vs I2S pin sharing | CS / timing discipline |
 | Task watchdog | Periodic `esp_task_wdt_reset()` in game loop or appropriate TWDT config |
+| Sound/tile cache contention | Sounds use dedicated PSRAM heap; tile cache is tiles-only |
 | Missing GRP | Fail startup with visible error |
 
 ---

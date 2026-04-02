@@ -88,10 +88,10 @@ void spi_lcd_send_boarder(uint16_t *scr, int /*border*/) {
     if (frame_count % 30 == 0) {
         UBaseType_t hwm = uxTaskGetStackHighWaterMark(NULL);
         int fps = (total_frame_us > 0) ? (int)(1000000 / total_frame_us) : 0;
-        printf("[F%d] fps≈%d  frame=%lldms  SD: %d loads %d bytes in %lldms  blit=%lldus  stack=%u\n",
+        printf("[F%d] fps≈%d  frame=%lldms  SD: %ld loads %ld bytes in %lldms  blit=%lldus  stack=%u\n",
                frame_count, fps,
                (long long)total_frame_us / 1000,
-               tile_loads, tile_bytes, (long long)tile_us / 1000,
+               (long)tile_loads, (long)tile_bytes, (long long)tile_us / 1000,
                (long long)t_blit_us,
                (unsigned)hwm);
     }
@@ -136,6 +136,14 @@ extern "C" FILE* platform_open_file(const char* rel_path, const char* mode) {
 
 extern "C" void platform_audio_write(const int16_t* pcm, int n) {
     auto* audio = esphome::i2s_audio::global_i2s;
-    // n is int16_t sample count (both channels). write_pcm expects bytes.
-    if (audio) audio->write_pcm(pcm, n * sizeof(int16_t));
+    if (!audio || n <= 0) return;
+    // pcm is mono at 11025 Hz; I2S is configured stereo, so duplicate L=R.
+    // n is at most MixBufferSize=256 samples; 512 int16 stereo = 1 KB stack.
+    if (n > 256) n = 256;
+    int16_t stereo[512];
+    for (int i = 0; i < n; i++) {
+        stereo[i * 2]     = pcm[i];
+        stereo[i * 2 + 1] = pcm[i];
+    }
+    audio->write_pcm(stereo, n * 2 * (int)sizeof(int16_t));
 }

@@ -9,12 +9,26 @@ import os
 
 Import("env")  # PlatformIO SCons env
 
-project_dir = env.subst("$PROJECT_DIR")
-cmake_path = os.path.join(
-    project_dir, ".esphome", "build", "duke3d-matrix", "src", "CMakeLists.txt"
-)
+# $PROJECT_DIR is the platformio.ini location.
+# When run via esphome.yaml extra_scripts, that is .esphome/build/<name>/ (the build dir).
+# The script may also be invoked from the project root in some configurations.
+# Detect which case we're in by checking for src/CMakeLists.txt existence.
+_pio_dir = env.subst("$PROJECT_DIR")
+
+
+if os.path.exists(os.path.join(_pio_dir, "src", "CMakeLists.txt")):
+    # Running from ESPHome build dir (.esphome/build/duke3d-matrix/)
+    cmake_path = os.path.join(_pio_dir, "src", "CMakeLists.txt")
+    real_root = os.path.normpath(os.path.join(_pio_dir, "..", "..", ".."))
+else:
+    # Fallback: assume $PROJECT_DIR is the project root
+    cmake_path = os.path.join(
+        _pio_dir, ".esphome", "build", "duke3d-matrix", "src", "CMakeLists.txt"
+    )
+    real_root = _pio_dir
+
 engine_base = os.path.join(
-    project_dir, "components", "duke3d", "engine", "components"
+    real_root, "components", "duke3d", "engine", "components"
 ).replace("\\", "/")
 
 MARKER = "Duke3D engine sources"
@@ -27,6 +41,7 @@ PATCH = (
     '    "${DUKE3D_ENGINE_BASE}/Engine/*.c"\n'
     '    "${DUKE3D_ENGINE_BASE}/Game/*.c"\n'
     '    "${DUKE3D_ENGINE_BASE}/SDL/*.c"\n'
+    '    "${DUKE3D_ENGINE_BASE}/audiolib/*.c"\n'
     ")\n"
     "# dummy_multi.c conflicts with mmulti.c (both define numplayers/syncstate/etc.).\n"
     "# spi_lcd.c is replaced by esp32_hal.cpp (renders to HUB75 instead of SPI LCD).\n"
@@ -38,6 +53,13 @@ PATCH = (
     "# SDL_event.c targets ODROID-GO GPIO hardware; replaced by stubs in sdl_stubs.c.\n"
     "# Demo playback mode (/dDEMO1.DMO) needs no real input events.\n"
     'list(FILTER engine_srcs EXCLUDE REGEX ".*/SDL_event\\\\.c$")\n'
+    "# Audiolib: exclude DOS ISA hardware drivers, OPL2/MIDI music, and stubs that\n"
+    "# include music.h -> duke3d.h (re-defines large globals, causes dup symbols).\n"
+    'foreach(_excl adlibfx al_midi awe32 blaster debugio dma dpmi\n'
+    '        gus gusmidi guswave irq leetimbr midi mpu401 music\n'
+    '        nomusic pas16 sndscape sndsrc task_man gmtimbre myprint usrhooks)\n'
+    '    list(FILTER engine_srcs EXCLUDE REGEX ".*/${_excl}\\\\.c$")\n'
+    'endforeach()\n'
     "\n"
 )
 
@@ -123,10 +145,15 @@ else:
 # --warn-common is set and -fcommon is used for the old C engine code.
 # ESP-IDF CMakeLists.txt adds --warn-common unconditionally; we strip it here.
 # This runs before ninja so the patched flags are used for linking.
-ninja_path = os.path.join(
-    project_dir, ".esphome", "build", "duke3d-matrix",
-    ".pioenvs", "duke3d-matrix", "build.ninja"
-)
+# When _pio_dir is the ESPHome build dir, ninja is at _pio_dir/.pioenvs/.../build.ninja.
+# When _pio_dir is the project root (fallback), it is under .esphome/build/....
+if os.path.isdir(os.path.join(_pio_dir, ".pioenvs")):
+    ninja_path = os.path.join(_pio_dir, ".pioenvs", "duke3d-matrix", "build.ninja")
+else:
+    ninja_path = os.path.join(
+        _pio_dir, ".esphome", "build", "duke3d-matrix",
+        ".pioenvs", "duke3d-matrix", "build.ninja"
+    )
 if os.path.exists(ninja_path):
     with open(ninja_path, "r") as f:
         ninja_content = f.read()

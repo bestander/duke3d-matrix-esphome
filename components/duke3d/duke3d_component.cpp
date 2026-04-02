@@ -130,9 +130,9 @@ void Duke3DComponent::setup() {
         }
     }
 
-    ESP_LOGI(TAG, "Free heap before task create: %u bytes", esp_get_free_heap_size());
-    ESP_LOGI(TAG, "Free internal heap: %u bytes",
-             heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    ESP_LOGI(TAG, "Free heap before task create: %lu bytes", (unsigned long)esp_get_free_heap_size());
+    ESP_LOGI(TAG, "Free internal heap: %lu bytes",
+             (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 
     const int stack = smoke_test_ ? SMOKE_TASK_STACK : TASK_STACK;
     BaseType_t rc = xTaskCreatePinnedToCoreWithCaps(
@@ -264,8 +264,7 @@ void Duke3DComponent::game_task(void* arg) {
     char* argv[] = {
         (char*)"duke3d",
         (char*)"-game_dir", (char*)"/sdcard/duke3d",
-        (char*)"/nm",
-        (char*)"/ns",
+        (char*)"/nm",       // music disabled (OPL2 not ported)
         demo_arg,
         nullptr
     };
@@ -279,7 +278,7 @@ void Duke3DComponent::game_task(void* arg) {
             m->swap_buffers();
         }
     }
-    duke3d_main(6, argv);
+    duke3d_main(5, argv);
     if (self->pause_wifi_) {
         printf("[duke3d] game exited — restarting WiFi\n");
         esp_wifi_start();

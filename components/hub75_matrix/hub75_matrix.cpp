@@ -486,7 +486,7 @@ bool grp_title_splash_build_cache_if_needed(const char *grp_path, const char *ca
             if (grp_splash_load_lookup_title_drealms(fp, static_cast<long>(data_off), sizes[fi]))
                 have_lookup_pals = true;
             else
-                ESP_LOGW(TAG_GRP_SPLASH, "LOOKUP.DAT present but parse failed (size=%u)", sizes[fi]);
+                ESP_LOGW(TAG_GRP_SPLASH, "LOOKUP.DAT present but parse failed (size=%lu)", (unsigned long)sizes[fi]);
         }
         data_off += sizes[fi];
     }
