@@ -19,6 +19,8 @@ esphome:
       # Hub75 ESP-IDF mode: disable Adafruit GFX dependency (CMakeLists sets this
       # via target_compile_options but PlatformIO doesn't run that CMakeLists).
       - -DNO_GFX
+      # Async GRP tile load spike (tiles.c): must match components/duke3d/CMakeLists.txt
+      - -DDUKE3D_TILE_ASYNC_SPIKE
 
 esp32:
   board: esp32-s3-devkitc-1

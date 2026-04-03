@@ -53,6 +53,7 @@ idf_component_register(
         "${ENGINE_DIR}/enet/include"
     COMPILE_DEFINITIONS
         DUKE3D_ENGINE_PRESENT
+        DUKE3D_TILE_ASYNC_SPIKE
     REQUIRES hub75_matrix hud sd_card i2s_audio freertos esp_task_wdt esp_wifi wifi usb driver
 )
 
