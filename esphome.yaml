@@ -78,7 +78,7 @@ hud:
 duke3d:
   id: game_engine
   # I2S output scale: 0 = mute, 100 = full mixer level (default 50 ≈ previous half-volume trim).
-  audio_output_percent: 10
+  audio_output_percent: 1
   # Wait for HA time sync before stopping WiFi at boot; otherwise clock stays 00:00 and sensors may not arrive.
   time_id: ha_time
   smoke_test: false

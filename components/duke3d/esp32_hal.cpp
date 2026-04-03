@@ -5,6 +5,7 @@
 #include "esphome/components/sd_card/sd_card.h"
 #include "esphome/components/i2s_audio/i2s_audio.h"
 #include "mv_stream.h"
+#include "esp_heap_caps.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -105,12 +106,26 @@ void spi_lcd_send_boarder(uint16_t *scr, int /*border*/) {
         if (su_d > 0U || sp_d > 0U) {
             snprintf(snd, sizeof(snd), "  sound: und+%u sh+%u", su_d, sp_d);
         }
+        const uint32_t caps_psram =
+            (uint32_t)MALLOC_CAP_SPIRAM;  // same as initengine printf in engine.c
+        const uint32_t caps_psram8 =
+            (uint32_t)(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        const uint32_t caps_int =
+            (uint32_t)(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        const size_t psram_free = heap_caps_get_free_size(caps_psram);
+        const size_t psram_largest = heap_caps_get_largest_free_block(caps_psram);
+        const size_t psram8_free = heap_caps_get_free_size(caps_psram8);
+        const size_t psram8_largest = heap_caps_get_largest_free_block(caps_psram8);
+        const size_t int_free = heap_caps_get_free_size(caps_int);
         printf("[F%d] fps≈%d  frame=%lldms  SD: %ld loads %ld bytes in %lldms  blit=%lldus  stack=%u%s\n",
                frame_count, fps,
                (long long)total_frame_us / 1000,
                (long)tile_loads, (long)tile_bytes, (long long)tile_us / 1000,
                (long long)t_blit_us,
                (unsigned)hwm, snd);
+        printf("[mem] psram_free=%zu psram_largest_blk=%zu  psram8_free=%zu psram8_largest_blk=%zu  int_free=%zu"
+               "  (psram_* = initengine caps; tile cache malloc needs contiguous ≤ psram8_largest_blk)\n",
+               psram_free, psram_largest, psram8_free, psram8_largest, int_free);
     }
 
     if (g_wifi_window_requested) {
