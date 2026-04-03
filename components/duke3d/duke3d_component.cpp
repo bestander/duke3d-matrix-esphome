@@ -25,7 +25,6 @@
 // Duke3D engine entry point — defined in engine_main_shim.c, which calls
 // the engine's main() in game.c.
 extern "C" int duke3d_main(int argc, char** argv);
-extern "C" void tile_async_spike_init(void);
 
 // Forward-declare the HUD instance pointer from the hud component.
 // Defined in hud.cpp (esphome::hud namespace); accessed in setup() below.
@@ -159,8 +158,6 @@ void Duke3DComponent::setup() {
     ESP_LOGI(TAG, "Free heap before task create: %lu bytes", (unsigned long)esp_get_free_heap_size());
     ESP_LOGI(TAG, "Free internal heap: %lu bytes",
              (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
-
-    tile_async_spike_init();
 
     const int stack = smoke_test_ ? SMOKE_TASK_STACK : TASK_STACK;
     BaseType_t rc = xTaskCreatePinnedToCoreWithCaps(
