@@ -21,6 +21,14 @@ static const uint8_t FONT_5X7[][5] = {
     {0x04, 0x06, 0x3F, 0x06, 0x04}, // ↑ up   (index 14)
     {0x08, 0x18, 0x3F, 0x18, 0x08}, // ↓ down (index 15)
     {0x08, 0x04, 0x08, 0x04, 0x08}, // ~ wave (index 16)
+    // BLE / Bluetooth indicator (index 17)
+    // 5×5 symbol centred in the 7-row slot (1 row padding top & bottom):
+    //   .X.     (rows 1-5 used; rows 0,6 blank)
+    //   .XX
+    //   XX.
+    //   .XX
+    //   .X.
+    {0x08, 0x3E, 0x14, 0x00, 0x00}, // BLE icon (index 17)
 };
 
 // Use integer constants instead of char codes to avoid UTF-8/Latin-1 ambiguity.
@@ -31,6 +39,7 @@ static const int FONT_IDX_C      = 13;
 static const int FONT_IDX_UP     = 14;
 static const int FONT_IDX_DOWN   = 15;
 static const int FONT_IDX_WAVE   = 16;
+static const int FONT_IDX_BLE    = 17;
 
 inline int font_index(char c) {
     if (c >= '0' && c <= '9') return c - '0';

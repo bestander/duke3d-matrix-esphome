@@ -49,6 +49,7 @@ public:
     void set_water_temp(float celsius);            // current water temperature
     void set_tide_high(const std::string& hhmm);  // "HH:MM"
     void set_tide_low(const std::string& hhmm);   // "HH:MM"
+    void set_ble_connected(bool connected);        // true = solid icon, false = blink (searching)
 
     void render(MatrixType& display);
 
@@ -59,6 +60,7 @@ private:
     float water_temp_ = 0.0f;
     char  tide_high_[6] = "--:--";
     char  tide_low_[6]  = "--:--";
+    bool  ble_connected_ = false;
     std::mutex data_mutex_;
     bool game_running_ = false;
 

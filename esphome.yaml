@@ -1,3 +1,7 @@
+substitutions:
+  # Xbox Wireless Controller (BLE): VID 0x045E PID 0x02FD, HID ACL. Pair on the console/PC first if needed.
+  ble_gamepad_mac: "83:25:03:36:47:6B"
+
 esphome:
   name: duke3d-matrix
   friendly_name: Duke3D Matrix
@@ -45,11 +49,24 @@ esp32:
       CONFIG_SPIRAM_BOOT_INIT: "y"
       CONFIG_SPIRAM_IGNORE_NOTFOUND: "y"
       CONFIG_SPIRAM_USE_MALLOC: "y"
+      # Pool for DMA-only and internal-only allocators (SDMMC, etc.). Do not starve this.
+      CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL: "65536"
       CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL: "16384"
+      # Pool kept in internal RAM for DMA-only allocators (SDMMC, etc.). Do not use
+      # CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP here — it frees WiFi buffers to SPIRAM but
+      # starves internal heap and breaks esp_dma_malloc for SD + WiFi ("m f null").
+      CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL: "65536"
       # Allow EXT_RAM_ATTR BSS variables (hittype 288KB, sprite 176KB, pvWalls 72KB, etc.)
       # to be placed in PSRAM BSS segment instead of internal DRAM.
       # Without this, the engine arrays overflow internal DRAM by ~1.6MB.
       CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY: "y"
+      # BLE: host stack can use PSRAM first so internal DRAM stays available for BT controller + DMA.
+      # Do NOT set CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP — it breaks SDMMC (esp_dma_malloc) and WiFi.
+      CONFIG_BT_ALLOCATION_FROM_SPIRAM_FIRST: "y"
+      CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY: "y"
+      # Trim WiFi RX buffers slightly to free internal RAM for BT+SD coexistence (defaults are higher).
+      CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM: "8"
+      CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM: "24"
       CONFIG_FREERTOS_HZ: "1000"
       CONFIG_ESP_MAIN_TASK_STACK_SIZE: "8192"
       CONFIG_ESP_TASK_WDT_TIMEOUT_S: "60"
@@ -78,7 +95,7 @@ hud:
 duke3d:
   id: game_engine
   # I2S output scale: 0 = mute, 100 = full mixer level (default 50 ≈ previous half-volume trim).
-  audio_output_percent: 1
+  audio_output_percent: 10
   # Wait for HA time sync before stopping WiFi at boot; otherwise clock stays 00:00 and sensors may not arrive.
   time_id: ha_time
   smoke_test: false
@@ -121,6 +138,37 @@ wifi:
     ssid: "Duke3D Fallback AP"
     password: !secret ap_password
 
+# BLE HID gamepad — connects to fixed MAC, logs decoded buttons from HID Report notifications.
+# Standard GATT: Human Interface Device 0x1812, Report 0x2A4D. If your controller uses a
+# vendor-specific characteristic, use nRF Connect to copy service/UUID into the sensor below.
+esp32_ble:
+  id: esp32_ble_hub
+
+esp32_ble_tracker:
+  ble_id: esp32_ble_hub
+
+ble_client:
+  - mac_address: ${ble_gamepad_mac}
+    id: ble_gamepad
+    on_connect:
+      - lambda: |-
+          ESP_LOGI("ble_gamepad", "Connected: %s", id(ble_gamepad)->address_str().c_str());
+          id(hud_display)->set_ble_connected(true);
+    on_disconnect:
+      - lambda: |-
+          ESP_LOGW("ble_gamepad", "Disconnected");
+          id(hud_display)->set_ble_connected(false);
+    # Uncomment if pairing asks for a 6-digit passkey (set the number your controller shows).
+    # on_passkey_notification:
+    #   - then:
+    #       - logger.log:
+    #           format: "BLE passkey to enter on controller: %u"
+    #           args: ["passkey"]
+    # on_passkey_request:
+    #   - ble_client.passkey_reply:
+    #       id: ble_gamepad
+    #       passkey: 123456
+
 captive_portal:
 
 api:
@@ -140,6 +188,9 @@ logger:
     wifi: WARN
     wifi_esp32: WARN
     esp32_ble: WARN
+    ble_sensor: INFO
+    ble_hid: INFO
+    ble_gamepad: INFO
 
 time:
   - platform: homeassistant
@@ -159,6 +210,60 @@ time:
                 id(hud_display)->set_time(t.hour, t.minute);
 
 sensor:
+  # BLE HID: notifications on standard Report characteristic (same layout as usb_gamepad.h defaults).
+  - platform: ble_client
+    type: characteristic
+    ble_client_id: ble_gamepad
+    name: "BLE HID report"
+    id: ble_hid_report_sensor
+    internal: true
+    service_uuid: "1812"
+    characteristic_uuid: "2A4D"
+    notify: true
+    update_interval: never
+    lambda: |-
+      static const char *const TAG = "ble_hid";
+      std::string hex;
+      hex.reserve(x.size() * 3);
+      for (const uint8_t b : x) {
+        char buf[4];
+        snprintf(buf, sizeof(buf), "%02X ", b);
+        hex += buf;
+      }
+      ESP_LOGI(TAG, "raw (%zu B): %s", x.size(), hex.c_str());
+      if (x.size() < 6) {
+        return NAN;
+      }
+      size_t o = 0;
+      if (x.size() >= 7 && x[0] != 0 && x[0] < 32) {
+        o = 1;
+      }
+      if (x.size() < o + 6) {
+        return NAN;
+      }
+      const uint8_t ax = x[o + 0];
+      const uint8_t ay = x[o + 1];
+      const uint8_t b0 = x[o + 4];
+      const uint8_t b1 = x[o + 5];
+      const bool dead_lo = ax < 64;
+      const bool dead_hi = ax > 192;
+      const bool dead_lo_y = ay < 64;
+      const bool dead_hi_y = ay > 192;
+      std::string pressed;
+      if (dead_lo_y) pressed += "forward ";
+      if (dead_hi_y) pressed += "back ";
+      if (dead_lo) pressed += "turn_left ";
+      if (dead_hi) pressed += "turn_right ";
+      if (b0 & (1 << 0)) pressed += "fire ";
+      if (b0 & (1 << 1)) pressed += "use ";
+      if (b0 & (1 << 2)) pressed += "map ";
+      if (b0 & (1 << 4)) pressed += "strafe_left ";
+      if (b0 & (1 << 5)) pressed += "strafe_right ";
+      if (b1 & (1 << 1)) pressed += "menu ";
+      if (!pressed.empty()) {
+        ESP_LOGI(TAG, "buttons: %s", pressed.c_str());
+      }
+      return (float) b0;
   # 8-hour air temperature forecast min/max — adjust entity IDs to match your HA setup
   - platform: homeassistant
     id: temp_min_8h
