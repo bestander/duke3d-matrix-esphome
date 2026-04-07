@@ -52,10 +52,6 @@ esp32:
       # Pool for DMA-only and internal-only allocators (SDMMC, etc.). Do not starve this.
       CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL: "65536"
       CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL: "16384"
-      # Pool kept in internal RAM for DMA-only allocators (SDMMC, etc.). Do not use
-      # CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP here — it frees WiFi buffers to SPIRAM but
-      # starves internal heap and breaks esp_dma_malloc for SD + WiFi ("m f null").
-      CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL: "65536"
       # Allow EXT_RAM_ATTR BSS variables (hittype 288KB, sprite 176KB, pvWalls 72KB, etc.)
       # to be placed in PSRAM BSS segment instead of internal DRAM.
       # Without this, the engine arrays overflow internal DRAM by ~1.6MB.
