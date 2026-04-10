@@ -1,7 +1,7 @@
 #pragma once
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
-#include "usb_gamepad.h"
+#include "ble_gamepad.h"
 
 enum class InputEvent : uint8_t {
     NONE = 0,
@@ -30,5 +30,5 @@ InputEvent input_pop();
 // one-shot events like menu navigation.
 // Thread-safe: written by USB host task via usb_gamepad, read by game task.
 static inline GamepadState input_get_state() {
-    return usb_gamepad_get_state();
+    return ble_gamepad_get_state();
 }

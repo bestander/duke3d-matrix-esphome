@@ -1,4 +1,5 @@
 .esphome/
+.venv-esphome/
 secrets.yaml
 *.bin
 *.elf

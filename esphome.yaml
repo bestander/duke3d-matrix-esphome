@@ -61,8 +61,19 @@ esp32:
       # BT controller VHCI buffers, DMA, and WiFi.
       CONFIG_BT_ALLOCATION_FROM_SPIRAM_FIRST: "y"
       CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY: "y"
-      # Trim WiFi RX buffers slightly to free internal RAM for BT+SD coexistence (defaults are higher).
-      CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM: "8"
+      # BT controller: reduce BLE activities 6→2 and scan dupe cache 100→20 to
+      # free ~20-30KB internal RAM for BlueDroid host FreeRTOS objects (mutexes,
+      # semaphores, task stacks — all must be in internal DRAM, not PSRAM).
+      # We only need 1 BLE connection (gamepad) + scanning.
+      CONFIG_BT_CTRL_BLE_MAX_ACT: "2"
+      CONFIG_BT_ACL_CONNECTIONS: "2"
+      CONFIG_BT_CTRL_SCAN_DUPL_CACHE_SIZE: "20"
+      # Trim WiFi static buffers to free internal RAM for BT host threads.
+      # Static TX: 16×1600B=25.6KB default → 6×1600B=9.6KB saves 16KB internal.
+      # Static RX: 8×1600B=12.8KB default → 4×1600B=6.4KB saves 6.4KB internal.
+      # BT host thread stacks (HCI+BTU+BTC ≈ 15KB) need that room.
+      CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM: "4"
+      CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM: "6"
       CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM: "24"
       CONFIG_FREERTOS_HZ: "1000"
       CONFIG_ESP_MAIN_TASK_STACK_SIZE: "8192"
@@ -96,7 +107,6 @@ duke3d:
   # Wait for HA time sync before stopping WiFi at boot; otherwise clock stays 00:00 and sensors may not arrive.
   time_id: ha_time
   smoke_test: false
-  usb_gamepad: false   # false = keep USB as JTAG/CDC debug interface
   # tile_cache: pre-extracts ≤128px tiles from DUKE3D.GRP into TCACHE.BIN on SD (one-time build).
   # At runtime loadtile() reads that flat file instead of seeking inside GRP/ART — fewer SD hits,
   # less stutter. Extra PSRAM helps engine heaps (Initcache); this is separate I/O optimization.
@@ -219,48 +229,9 @@ sensor:
     notify: true
     update_interval: never
     lambda: |-
-      static const char *const TAG = "ble_hid";
-      std::string hex;
-      hex.reserve(x.size() * 3);
-      for (const uint8_t b : x) {
-        char buf[4];
-        snprintf(buf, sizeof(buf), "%02X ", b);
-        hex += buf;
-      }
-      ESP_LOGI(TAG, "raw (%zu B): %s", x.size(), hex.c_str());
-      if (x.size() < 6) {
-        return NAN;
-      }
-      size_t o = 0;
-      if (x.size() >= 7 && x[0] != 0 && x[0] < 32) {
-        o = 1;
-      }
-      if (x.size() < o + 6) {
-        return NAN;
-      }
-      const uint8_t ax = x[o + 0];
-      const uint8_t ay = x[o + 1];
-      const uint8_t b0 = x[o + 4];
-      const uint8_t b1 = x[o + 5];
-      const bool dead_lo = ax < 64;
-      const bool dead_hi = ax > 192;
-      const bool dead_lo_y = ay < 64;
-      const bool dead_hi_y = ay > 192;
-      std::string pressed;
-      if (dead_lo_y) pressed += "forward ";
-      if (dead_hi_y) pressed += "back ";
-      if (dead_lo) pressed += "turn_left ";
-      if (dead_hi) pressed += "turn_right ";
-      if (b0 & (1 << 0)) pressed += "fire ";
-      if (b0 & (1 << 1)) pressed += "use ";
-      if (b0 & (1 << 2)) pressed += "map ";
-      if (b0 & (1 << 4)) pressed += "strafe_left ";
-      if (b0 & (1 << 5)) pressed += "strafe_right ";
-      if (b1 & (1 << 1)) pressed += "menu ";
-      if (!pressed.empty()) {
-        ESP_LOGI(TAG, "buttons: %s", pressed.c_str());
-      }
-      return (float) b0;
+      extern void ble_gamepad_push_report(const uint8_t *data, size_t len);
+      ble_gamepad_push_report(x.data(), x.size());
+      return NAN;
   # 8-hour air temperature forecast min/max — adjust entity IDs to match your HA setup
   - platform: homeassistant
     id: temp_min_8h
