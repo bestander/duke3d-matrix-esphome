@@ -37,7 +37,7 @@ typedef struct {
 void ble_gamepad_push_report(const uint8_t *data, size_t len);
 
 // Returns a snapshot of the current held state.
-// Thread-safe: written by ESPHome loop task, read by game task.
+// Thread-safe: written by NimBLE host task, read by game task.
 GamepadState ble_gamepad_get_state(void);
 
 #ifdef __cplusplus

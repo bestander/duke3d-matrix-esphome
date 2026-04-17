@@ -106,6 +106,8 @@ The game data is from Duke Nukem 3D Shareware 1.3 (free) or the full Atomic Edit
 
 - [ESPHome](https://esphome.io) 2024.11+
 - PlatformIO (installed automatically by ESPHome)
+- Python 3 (for the tile build script)
+- `esptool.py` — `pip install esptool`
 - A `secrets.yaml` (copy from `secrets.yaml.template` and fill in)
 
 ### Clone with submodules
@@ -117,13 +119,29 @@ cp secrets.yaml.template secrets.yaml
 # edit secrets.yaml
 ```
 
-### Flash
+### First-time flash (two steps)
 
+Tile pixel data lives in a dedicated flash partition separate from the firmware.
+Both steps are required on first flash; after that, only reflash the part that changed.
+
+**Step 1 — firmware** (flashes app + partition table):
 ```bash
 esphome run esphome.yaml
 ```
 
-OTA updates work after the first flash.
+**Step 2 — tile data** (one-time; rebuild only if `DUKE3D.GRP` changes):
+```bash
+# Build tiles.bin from your GRP file (runs in seconds, output cached by GRP size)
+python3 tools/make_tile_bin.py --grp /path/to/DUKE3D.GRP --out tools/tiles.bin
+
+# Flash to the tiles partition
+esptool.py --port /dev/cu.usbmodem101 write_flash 0x310000 tools/tiles.bin
+```
+
+Replace `/dev/cu.usbmodem101` with your serial port (`ls /dev/cu.*` on macOS, `/dev/ttyUSB*` on Linux).
+
+> **Note:** OTA updates are not available — the partition table removes the OTA slot to make
+> room for the 4.9 MB tiles partition. Use USB to reflash when needed.
 
 ---
 
@@ -137,13 +155,37 @@ The ESP32-S3's 2 MB PSRAM is split between the PSRAM BSS segment (static arrays)
 | MAXWALLS | 8192 | 4096 | −128 KB |
 | MAXWALLSB | 2048 | 1024 | −66 KB |
 
-After reductions, the PSRAM heap pool sits at ~540 KB, of which ~393 KB goes to the tile cache.
+### Flash tile cache
+
+Tile pixel data (1,514 tiles, 4.4 MB) is stored in a dedicated flash partition and
+memory-mapped read-only via `esp_partition_mmap()` into the ESP32-S3 DCache address space.
+This replaces the 262 KB PSRAM tile cache with a 32 KB safety-net buffer, freeing enough
+heap for all 32 palookup tables (~263 KB) to live in PSRAM rather than permanently
+occupying the tile cache.
+
+### Flash partition layout
+
+| Partition | Offset | Size | Contents |
+|-----------|--------|------|----------|
+| nvs | 0x9000 | 16 KB | ESPHome settings |
+| app0 | 0x10000 | 3 MB | Firmware |
+| tiles | 0x310000 | 4.9 MB | Tile pixel data (TCACHE04) |
+
+### Runtime PSRAM budget
+
+| Checkpoint | Free |
+|---|---|
+| After hub75 / WiFi / SD init | ~393 KB |
+| After BLE (NimBLE) at `initengine` | ~323 KB |
+| After `initcache` (32 KB) | ~291 KB |
+| After 32 palookup tables (~263 KB) | ~28 KB remaining heap |
 
 | Region | Usage |
 |--------|-------|
-| Internal DRAM | ~128 KB used (39.7% of 320 KB) — WiFi, DMA, FreeRTOS |
+| Internal DRAM | ~177 KB free after setup — WiFi, DMA, FreeRTOS, BLE |
 | PSRAM BSS | ~1.4 MB — engine arrays (hittype, sprite, wall, sector, etc.) |
-| PSRAM heap | ~540 KB pool: 393 KB tile cache + 64 KB task stack + palettes |
+| PSRAM heap | ~457 KB pool: 32 KB tile cache + palookups + audio buffers |
+| Flash (tiles) | 4.4 MB mapped read-only — zero PSRAM cost |
 
 ---
 

@@ -16,7 +16,9 @@
 #include "freertos/idf_additions.h"
 #include "esp32_hal.h"
 #include "tilecache.h"
+#include "flash_tiles.h"
 #include "input.h"
+#include "nimble_gamepad.h"
 #include <cstring>
 #include <dirent.h>
 #include <strings.h>
@@ -144,6 +146,18 @@ void Duke3DComponent::setup() {
 
     g_duke3d_component = this;
     input_init();
+    if (!ble_gamepad_mac_.empty()) {
+        nimble_gamepad_set_target_mac(ble_gamepad_mac_.c_str());
+    }
+    nimble_gamepad_init();
+
+#ifdef DUKE3D_FLASH_TILES
+    // Must mmap from here (main task = internal-RAM stack).
+    // The game task uses PSRAM stack; esp_partition_mmap asserts non-PSRAM stack.
+    if (flash_tiles_premap() != 0) {
+        ESP_LOGW(TAG, "flash_tiles_premap failed — tiles will load from SD");
+    }
+#endif
 
     ESP_LOGI(TAG, "Free heap before task create: %lu bytes", (unsigned long)esp_get_free_heap_size());
     ESP_LOGI(TAG, "Free internal heap: %lu bytes",

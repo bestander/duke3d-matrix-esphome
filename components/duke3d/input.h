@@ -15,7 +15,7 @@ enum class InputEvent : uint8_t {
 // Initialize input subsystem. Call from duke3d_component setup().
 void input_init();
 
-// Push from task context (USB HID callback, button handler task).
+// Push from task context (button handler task).
 void input_push(InputEvent evt);
 
 // Push from hardware ISR context only (GPIO interrupt).
@@ -25,10 +25,10 @@ void input_push_from_isr(InputEvent evt);
 // Called from game task (Core 1) each tick.
 InputEvent input_pop();
 
-// Held-button state — updated from USB HID reports every ~8-16 ms.
+// Held-button state — updated from BLE HID reports every ~8-16 ms.
 // Use this for movement/turning (held actions); use input_pop() for
 // one-shot events like menu navigation.
-// Thread-safe: written by USB host task via usb_gamepad, read by game task.
+// Thread-safe: written by NimBLE host task via ble_gamepad, read by game task.
 static inline GamepadState input_get_state() {
     return ble_gamepad_get_state();
 }

@@ -38,6 +38,8 @@ idf_component_register(
         "tilecache.cpp"
         "input.cpp"
         "ble_gamepad.cpp"
+        "nimble_gamepad.cpp"
+        "flash_tiles.cpp"
         "engine_main_shim.c"
         "audiolib_stubs.c"
         ${ENGINE_SRCS}
@@ -53,7 +55,7 @@ idf_component_register(
         "${ENGINE_DIR}/enet/include"
     COMPILE_DEFINITIONS
         DUKE3D_ENGINE_PRESENT
-    REQUIRES hub75_matrix hud sd_card i2s_audio freertos esp_task_wdt esp_wifi wifi driver
+    REQUIRES hub75_matrix hud sd_card i2s_audio freertos esp_task_wdt esp_wifi wifi driver bt
 )
 
 # mmulti.c includes <enet/enet.h> unconditionally via HAVE_ENET_ENET_H.

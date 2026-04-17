@@ -23,6 +23,7 @@ esphome:
       # Hub75 ESP-IDF mode: disable Adafruit GFX dependency (CMakeLists sets this
       # via target_compile_options but PlatformIO doesn't run that CMakeLists).
       - -DNO_GFX
+      - -DDUKE3D_FLASH_TILES
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -56,22 +57,19 @@ esp32:
       # to be placed in PSRAM BSS segment instead of internal DRAM.
       # Without this, the engine arrays overflow internal DRAM by ~1.6MB.
       CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY: "y"
-      # BLE: ESPHome 2024.x uses BlueDroid (not NimBLE) on ESP32-S3.
-      # Route BlueDroid allocations to PSRAM first so internal DRAM stays free for the
-      # BT controller VHCI buffers, DMA, and WiFi.
-      CONFIG_BT_ALLOCATION_FROM_SPIRAM_FIRST: "y"
-      CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY: "y"
-      # BT controller: reduce BLE activities 6→2 and scan dupe cache 100→20 to
-      # free ~20-30KB internal RAM for BlueDroid host FreeRTOS objects (mutexes,
-      # semaphores, task stacks — all must be in internal DRAM, not PSRAM).
-      # We only need 1 BLE connection (gamepad) + scanning.
-      CONFIG_BT_CTRL_BLE_MAX_ACT: "2"
-      CONFIG_BT_ACL_CONNECTIONS: "2"
-      CONFIG_BT_CTRL_SCAN_DUPL_CACHE_SIZE: "20"
-      # Trim WiFi static buffers to free internal RAM for BT host threads.
-      # Static TX: 16×1600B=25.6KB default → 6×1600B=9.6KB saves 16KB internal.
-      # Static RX: 8×1600B=12.8KB default → 4×1600B=6.4KB saves 6.4KB internal.
-      # BT host thread stacks (HCI+BTU+BTC ≈ 15KB) need that room.
+      CONFIG_BT_NIMBLE_ENABLED: "y"
+      CONFIG_BT_ENABLED: "y"
+      CONFIG_BT_NIMBLE_MAX_CONNECTIONS: "1"
+      CONFIG_BT_NIMBLE_ROLE_CENTRAL: "y"
+      CONFIG_BT_NIMBLE_ROLE_PERIPHERAL: "n"
+      CONFIG_BT_NIMBLE_ROLE_BROADCASTER: "n"
+      CONFIG_BT_NIMBLE_ROLE_OBSERVER: "n"
+      CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL: "y"
+      CONFIG_BT_NIMBLE_NVS_PERSIST: "n"
+      CONFIG_BT_NIMBLE_SM_LEGACY: "y"
+      CONFIG_BT_NIMBLE_SM_SC: "y"
+      CONFIG_BT_NIMBLE_LOG_LEVEL: "1"
+      # Keep WiFi lean during bootstrap; this internal RAM is needed by audio init.
       CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM: "4"
       CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM: "6"
       CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM: "24"
@@ -111,6 +109,7 @@ duke3d:
   # At runtime loadtile() reads that flat file instead of seeking inside GRP/ART — fewer SD hits,
   # less stutter. Extra PSRAM helps engine heaps (Initcache); this is separate I/O optimization.
   tile_cache: false
+  flash_tiles: true
   pause_wifi: true
   # Minimum seconds after WiFi associates; bootstrap also waits for time_id to be valid (unless 120s cap).
   wifi_bootstrap_grace_s: 8
@@ -118,6 +117,7 @@ duke3d:
   wifi_ha_sync: false
   # Min seconds between HA WiFi syncs triggered by non-demo level loads (debounce).
   wifi_sync_min_interval_s: 90
+  ble_gamepad_mac: ${ble_gamepad_mac}
 
 # Matrix Portal S3 GPIO strip: A1=GPIO3, A2=GPIO9, A3=GPIO10, A4=GPIO11, TX=GPIO18, RX=GPIO8
 # JST 3-pin connector: A0=GPIO12
@@ -145,37 +145,6 @@ wifi:
     ssid: "Duke3D Fallback AP"
     password: !secret ap_password
 
-# BLE HID gamepad — connects to fixed MAC, logs decoded buttons from HID Report notifications.
-# Standard GATT: Human Interface Device 0x1812, Report 0x2A4D. If your controller uses a
-# vendor-specific characteristic, use nRF Connect to copy service/UUID into the sensor below.
-esp32_ble:
-  id: esp32_ble_hub
-
-esp32_ble_tracker:
-  ble_id: esp32_ble_hub
-
-ble_client:
-  - mac_address: ${ble_gamepad_mac}
-    id: ble_gamepad
-    on_connect:
-      - lambda: |-
-          ESP_LOGI("ble_gamepad", "Connected: %s", id(ble_gamepad)->address_str().c_str());
-          id(hud_display)->set_ble_connected(true);
-    on_disconnect:
-      - lambda: |-
-          ESP_LOGW("ble_gamepad", "Disconnected");
-          id(hud_display)->set_ble_connected(false);
-    # Uncomment if pairing asks for a 6-digit passkey (set the number your controller shows).
-    # on_passkey_notification:
-    #   - then:
-    #       - logger.log:
-    #           format: "BLE passkey to enter on controller: %u"
-    #           args: ["passkey"]
-    # on_passkey_request:
-    #   - ble_client.passkey_reply:
-    #       id: ble_gamepad
-    #       passkey: 123456
-
 captive_portal:
 
 api:
@@ -194,9 +163,6 @@ logger:
     S3: DEBUG
     wifi: WARN
     wifi_esp32: WARN
-    esp32_ble: WARN
-    ble_sensor: INFO
-    ble_hid: INFO
     ble_gamepad: INFO
 
 time:
@@ -217,21 +183,6 @@ time:
                 id(hud_display)->set_time(t.hour, t.minute);
 
 sensor:
-  # BLE HID: notifications on standard Report characteristic (same layout as usb_gamepad.h defaults).
-  - platform: ble_client
-    type: characteristic
-    ble_client_id: ble_gamepad
-    name: "BLE HID report"
-    id: ble_hid_report_sensor
-    internal: true
-    service_uuid: "1812"
-    characteristic_uuid: "2A4D"
-    notify: true
-    update_interval: never
-    lambda: |-
-      extern void ble_gamepad_push_report(const uint8_t *data, size_t len);
-      ble_gamepad_push_report(x.data(), x.size());
-      return NAN;
   # 8-hour air temperature forecast min/max — adjust entity IDs to match your HA setup
   - platform: homeassistant
     id: temp_min_8h

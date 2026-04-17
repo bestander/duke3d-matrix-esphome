@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <string>
 #include "esphome/core/component.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -28,6 +29,8 @@ public:
     void set_audio_output_percent(uint8_t v) { audio_output_percent_ = v > 100 ? 100 : v; }
     /// If set, bootstrap keeps WiFi up until `now().is_valid()` (HA time synced), not just grace_s.
     void set_time_id(time::RealTimeClock *t) { time_id_ = t; }
+    /// Target BLE controller MAC for NimBLE central connection (AA:BB:CC:DD:EE:FF).
+    void set_ble_gamepad_mac(const std::string &v) { ble_gamepad_mac_ = v; }
 
     /// Engine hook: queue cooperative HA / WiFi sync (debounced).
     void queue_ha_sync_if_eligible(uint8_t g_mode);
@@ -46,6 +49,7 @@ private:
     bool wifi_ha_sync_ = true;
     uint8_t audio_output_percent_ = 50;
     time::RealTimeClock *time_id_{nullptr};
+    std::string ble_gamepad_mac_;
     bool bootstrap_released_ = false;
     int64_t first_wifi_connected_at_us_ = 0;
     WifiWindowState wifi_state_ = WifiWindowState::STOPPED;
