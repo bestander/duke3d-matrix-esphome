@@ -1,7 +1,3 @@
-substitutions:
-  # Xbox Wireless Controller (BLE): VID 0x045E PID 0x02FD, HID ACL. Pair on the console/PC first if needed.
-  ble_gamepad_mac: "83:25:03:36:47:6B"
-
 esphome:
   name: duke3d-matrix
   friendly_name: Duke3D Matrix
@@ -101,7 +97,7 @@ hud:
 duke3d:
   id: game_engine
   # I2S output scale: 0 = mute, 100 = full mixer level (default 50 ≈ previous half-volume trim).
-  audio_output_percent: 10
+  audio_output_percent: 1
   # Wait for HA time sync before stopping WiFi at boot; otherwise clock stays 00:00 and sensors may not arrive.
   time_id: ha_time
   smoke_test: false
@@ -117,7 +113,7 @@ duke3d:
   wifi_ha_sync: false
   # Min seconds between HA WiFi syncs triggered by non-demo level loads (debounce).
   wifi_sync_min_interval_s: 90
-  ble_gamepad_mac: ${ble_gamepad_mac}
+  ble_gamepad_uuid: "3CFDC64B-DF67-DB45-01FD-D31FAE4FBEAE"
 
 # Matrix Portal S3 GPIO strip: A1=GPIO3, A2=GPIO9, A3=GPIO10, A4=GPIO11, TX=GPIO18, RX=GPIO8
 # JST 3-pin connector: A0=GPIO12

@@ -4,9 +4,9 @@
 extern "C" {
 #endif
 
-// Set target BLE gamepad MAC address (AA:BB:CC:DD:EE:FF). Optional but
-// recommended; when unset, NimBLE init logs an error and does not scan.
-void nimble_gamepad_set_target_mac(const char *mac);
+// Set target BLE gamepad by advertised 128-bit service UUID
+// (format: XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX).
+void nimble_gamepad_set_target_uuid(const char *uuid_str);
 
 // Call once from Duke3DComponent::setup(), after WiFi bootstrap config and
 // before the game task starts.

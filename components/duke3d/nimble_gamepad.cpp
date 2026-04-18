@@ -28,8 +28,10 @@ static const char *TAG = "nimble_gamepad";
 
 static uint8_t s_own_addr_type = BLE_OWN_ADDR_PUBLIC;
 static bool s_nimble_started = false;
-static bool s_target_set = false;
-static uint8_t s_target_mac_be[6] = {0};  // parsed AA:BB:CC:DD:EE:FF order
+
+static bool s_use_uuid = false;
+static ble_uuid128_t s_target_uuid = {};
+
 
 static uint16_t s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static uint16_t s_hid_svc_start = 0;
@@ -46,32 +48,53 @@ static void set_hud_connected(bool connected) {
   }
 }
 
-static bool parse_mac_be(const char *mac, uint8_t out[6]) {
-  if (mac == nullptr) {
+static bool parse_uuid128(const char *str, ble_uuid128_t *out) {
+  if (str == nullptr) return false;
+  unsigned int b[16];
+  // Accept XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX
+  if (sscanf(str,
+             "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+             &b[0], &b[1], &b[2], &b[3], &b[4], &b[5], &b[6], &b[7],
+             &b[8], &b[9], &b[10], &b[11], &b[12], &b[13], &b[14], &b[15]) != 16)
     return false;
-  }
-  unsigned int b[6];
-  if (sscanf(mac, "%02x:%02x:%02x:%02x:%02x:%02x",
-             &b[0], &b[1], &b[2], &b[3], &b[4], &b[5]) != 6) {
-    return false;
-  }
-  for (int i = 0; i < 6; i++) {
-    out[i] = static_cast<uint8_t>(b[i]);
-  }
+  out->u.type = BLE_UUID_TYPE_128;
+  // NimBLE stores 128-bit UUIDs little-endian
+  for (int i = 0; i < 16; i++) out->value[i] = static_cast<uint8_t>(b[15 - i]);
   return true;
 }
 
-static bool addr_matches_target(const ble_addr_t *addr) {
-  if (!s_target_set || addr == nullptr) {
-    return false;
+// Returns true if advertisement contains target UUID. Also populates name_out and logs UUIDs.
+static bool adv_matches_target(const uint8_t *data, uint8_t len,
+                               char *name_out, size_t name_out_sz,
+                               char *uuids_out, size_t uuids_out_sz) {
+  name_out[0] = '\0';
+  uuids_out[0] = '\0';
+  if (data == nullptr || len == 0) return false;
+  struct ble_hs_adv_fields fields;
+  if (ble_hs_adv_parse_fields(&fields, data, len) != 0) return false;
+
+  if (fields.name != nullptr && fields.name_len > 0) {
+    size_t copy = fields.name_len < name_out_sz - 1 ? fields.name_len : name_out_sz - 1;
+    memcpy(name_out, fields.name, copy);
+    name_out[copy] = '\0';
   }
-  // NimBLE stores address bytes little-endian in ble_addr_t::val.
-  const bool little_match = memcmp(addr->val, s_target_mac_be, 6) == 0;
-  const bool big_match =
-      addr->val[0] == s_target_mac_be[5] && addr->val[1] == s_target_mac_be[4] &&
-      addr->val[2] == s_target_mac_be[3] && addr->val[3] == s_target_mac_be[2] &&
-      addr->val[4] == s_target_mac_be[1] && addr->val[5] == s_target_mac_be[0];
-  return little_match || big_match;
+
+  // Build UUID log string and check for target
+  bool matched = false;
+  int pos = 0;
+  for (int i = 0; i < fields.num_uuids16 && pos < (int)uuids_out_sz - 8; i++) {
+    pos += snprintf(uuids_out + pos, uuids_out_sz - pos, "%04X ", fields.uuids16[i].value);
+  }
+  for (int i = 0; i < fields.num_uuids128; i++) {
+    const uint8_t *v = fields.uuids128[i].value;
+    if (pos < (int)uuids_out_sz - 40)
+      pos += snprintf(uuids_out + pos, uuids_out_sz - pos,
+                      "%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X ",
+                      v[15],v[14],v[13],v[12],v[11],v[10],v[9],v[8],
+                      v[7],v[6],v[5],v[4],v[3],v[2],v[1],v[0]);
+    if (s_use_uuid && ble_uuid_cmp(&fields.uuids128[i].u, &s_target_uuid.u) == 0) matched = true;
+  }
+  return matched;
 }
 
 static void start_scan(void);
@@ -140,9 +163,13 @@ static int disc_svc_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
 }
 
 static void start_scan(void) {
-  if (!s_target_set) {
-    ESP_LOGE(TAG, "BLE target MAC is not set; skipping scan");
-    return;
+  char target_str[48] = "(no uuid)";
+  if (s_use_uuid) {
+    const uint8_t *v = s_target_uuid.value;
+    snprintf(target_str, sizeof(target_str),
+             "%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X",
+             v[15],v[14],v[13],v[12],v[11],v[10],v[9],v[8],
+             v[7],v[6],v[5],v[4],v[3],v[2],v[1],v[0]);
   }
 
   struct ble_gap_disc_params params;
@@ -157,16 +184,29 @@ static void start_scan(void) {
     ESP_LOGW(TAG, "ble_gap_disc failed: rc=%d", rc);
     return;
   }
-  ESP_LOGI(TAG, "Scanning for BLE gamepad...");
+  ESP_LOGI(TAG, "Scanning for BLE gamepad (target=%s)...", target_str);
 }
 
 static int gap_event_cb(struct ble_gap_event *event, void *arg) {
   (void)arg;
   switch (event->type) {
     case BLE_GAP_EVENT_DISC: {
-      if (!addr_matches_target(&event->disc.addr)) {
+      const ble_addr_t *a = &event->disc.addr;
+      char found_str[18];
+      snprintf(found_str, sizeof(found_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+               a->val[5], a->val[4], a->val[3], a->val[2], a->val[1], a->val[0]);
+
+      char dev_name[32];
+      char dev_uuids[120];
+      bool matched = adv_matches_target(event->disc.data, event->disc.length_data,
+                                        dev_name, sizeof(dev_name),
+                                        dev_uuids, sizeof(dev_uuids));
+      if (!matched) {
+        ESP_LOGI(TAG, "Found device %s (addrtype=%d evtype=%d) name='%s' uuids=[%s]— not target",
+                 found_str, a->type, event->disc.event_type, dev_name, dev_uuids);
         return 0;
       }
+      ESP_LOGI(TAG, "Found target device %s — attempting connect", found_str);
       ble_gap_disc_cancel();
       int rc =
           ble_gap_connect(s_own_addr_type, &event->disc.addr, BLE_HS_FOREVER, nullptr, gap_event_cb, nullptr);
@@ -228,11 +268,13 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
 }
 
 static void on_sync(void) {
+  ESP_LOGI(TAG, "NimBLE host synced — BLE stack ready");
   int rc = ble_hs_id_infer_auto(0, &s_own_addr_type);
   if (rc != 0) {
     ESP_LOGW(TAG, "ble_hs_id_infer_auto failed: rc=%d", rc);
     return;
   }
+  ESP_LOGI(TAG, "Own addr type: %d", s_own_addr_type);
   start_scan();
 }
 
@@ -246,23 +288,21 @@ static void nimble_host_task(void *param) {
 
 }  // namespace
 
-void nimble_gamepad_set_target_mac(const char *mac) {
-  s_target_set = parse_mac_be(mac, s_target_mac_be);
-  if (!s_target_set) {
-    ESP_LOGE(TAG, "Invalid BLE MAC '%s' (expected AA:BB:CC:DD:EE:FF)", mac ? mac : "");
+void nimble_gamepad_set_target_uuid(const char *uuid_str) {
+  s_use_uuid = parse_uuid128(uuid_str, &s_target_uuid);
+  if (!s_use_uuid) {
+    ESP_LOGE(TAG, "Invalid BLE UUID '%s'", uuid_str ? uuid_str : "");
     return;
   }
-  ESP_LOGI(TAG, "Configured BLE target MAC: %s", mac);
+  ESP_LOGI(TAG, "Configured BLE target UUID: %s", uuid_str);
 }
 
 void nimble_gamepad_init(void) {
   if (s_nimble_started) {
+    ESP_LOGI(TAG, "NimBLE already started, skipping init");
     return;
   }
-  if (!s_target_set) {
-    ESP_LOGE(TAG, "nimble_gamepad_init called without target MAC");
-    return;
-  }
+  ESP_LOGI(TAG, "Initializing NimBLE gamepad (uuid=%s)", s_use_uuid ? "yes" : "no");
 
   nimble_port_init();
 

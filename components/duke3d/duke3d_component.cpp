@@ -146,8 +146,8 @@ void Duke3DComponent::setup() {
 
     g_duke3d_component = this;
     input_init();
-    if (!ble_gamepad_mac_.empty()) {
-        nimble_gamepad_set_target_mac(ble_gamepad_mac_.c_str());
+    if (!ble_gamepad_uuid_.empty()) {
+        nimble_gamepad_set_target_uuid(ble_gamepad_uuid_.c_str());
     }
     nimble_gamepad_init();
 

@@ -117,15 +117,17 @@ void spi_lcd_send_boarder(uint16_t *scr, int /*border*/) {
         const size_t psram8_free = heap_caps_get_free_size(caps_psram8);
         const size_t psram8_largest = heap_caps_get_largest_free_block(caps_psram8);
         const size_t int_free = heap_caps_get_free_size(caps_int);
-        printf("[F%d] fps≈%d  frame=%lldms  SD: %ld loads %ld bytes in %lldms  blit=%lldus  stack=%u%s\n",
-               frame_count, fps,
-               (long long)total_frame_us / 1000,
-               (long)tile_loads, (long)tile_bytes, (long long)tile_us / 1000,
-               (long long)t_blit_us,
-               (unsigned)hwm, snd);
-        printf("[mem] psram_free=%zu psram_largest_blk=%zu  psram8_free=%zu psram8_largest_blk=%zu  int_free=%zu"
-               "  (psram_* = initengine caps; tile cache malloc needs contiguous ≤ psram8_largest_blk)\n",
-               psram_free, psram_largest, psram8_free, psram8_largest, int_free);
+        // printf("[F%d] fps≈%d  frame=%lldms  SD: %ld loads %ld bytes in %lldms  blit=%lldus  stack=%u%s\n",
+        //        frame_count, fps,
+        //        (long long)total_frame_us / 1000,
+        //        (long)tile_loads, (long)tile_bytes, (long long)tile_us / 1000,
+        //        (long long)t_blit_us,
+        //        (unsigned)hwm, snd);
+        // printf("[mem] psram_free=%zu psram_largest_blk=%zu  psram8_free=%zu psram8_largest_blk=%zu  int_free=%zu"
+        //        "  (psram_* = initengine caps; tile cache malloc needs contiguous ≤ psram8_largest_blk)\n",
+        //        psram_free, psram_largest, psram8_free, psram8_largest, int_free);
+        (void)fps; (void)psram_free; (void)psram_largest; (void)psram8_free; (void)psram8_largest; (void)int_free;
+        (void)hwm; (void)snd; (void)t_blit_us; (void)tile_loads; (void)tile_bytes; (void)tile_us;
     }
 
     if (g_wifi_window_requested) {
