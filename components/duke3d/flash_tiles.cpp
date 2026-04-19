@@ -72,9 +72,16 @@ int flash_tiles_init(void)
         uint32_t e = etab[i];
         if (e == FT_ABSENT)
             continue;
-        waloff[i]      = (uint8_t *)s_mmap_base + FT_OFF(e);
-        picsiz[i]      = (uint8_t)(FT_LW(e) | (FT_LH(e) << 4));
-        tiles[i].lock  = 255;
+        waloff[i]     = (uint8_t *)s_mmap_base + FT_OFF(e);
+        picsiz[i]     = (uint8_t)(FT_LW(e) | (FT_LH(e) << 4));
+        tiles[i].lock = 255;
+        // Oversized tiles (original GRP dim > 128) were downscaled to power-of-2
+        // by the packer. Update dim so the renderer uses the correct column stride.
+        // Fit tiles (≤128 in both axes) are stored at original size — leave dim alone.
+        if (tiles[i].dim.width > 128 || tiles[i].dim.height > 128) {
+            tiles[i].dim.width  = (int16_t)(1u << FT_LW(e));
+            tiles[i].dim.height = (int16_t)(1u << FT_LH(e));
+        }
         count++;
     }
 

@@ -135,7 +135,7 @@ esphome run esphome.yaml
 python3 tools/make_tile_bin.py --grp /path/to/DUKE3D.GRP --out tools/tiles.bin
 
 # Flash to the tiles partition
-esptool.py --port /dev/cu.usbmodem101 write_flash 0x310000 tools/tiles.bin
+esptool.py --port /dev/cu.usbmodem101 write_flash 0x210000 tools/tiles.bin
 ```
 
 Replace `/dev/cu.usbmodem101` with your serial port (`ls /dev/cu.*` on macOS, `/dev/ttyUSB*` on Linux).
@@ -157,19 +157,19 @@ The ESP32-S3's 2 MB PSRAM is split between the PSRAM BSS segment (static arrays)
 
 ### Flash tile cache
 
-Tile pixel data (1,514 tiles, 4.4 MB) is stored in a dedicated flash partition and
+Tile pixel data (1,605 tiles, 5.5 MB) is stored in a dedicated flash partition and
 memory-mapped read-only via `esp_partition_mmap()` into the ESP32-S3 DCache address space.
-This replaces the 262 KB PSRAM tile cache with a 32 KB safety-net buffer, freeing enough
-heap for all 32 palookup tables (~263 KB) to live in PSRAM rather than permanently
-occupying the tile cache.
+Oversized tiles (>128 px on any axis) are packed at power-of-2 dimensions using majority-vote
+area-averaging downscale. This replaces the 262 KB PSRAM tile cache with a 32 KB safety-net
+buffer, freeing enough heap for all 32 palookup tables (~263 KB) to live in PSRAM.
 
 ### Flash partition layout
 
 | Partition | Offset | Size | Contents |
 |-----------|--------|------|----------|
 | nvs | 0x9000 | 16 KB | ESPHome settings |
-| app0 | 0x10000 | 3 MB | Firmware |
-| tiles | 0x310000 | 4.9 MB | Tile pixel data (TCACHE04) |
+| app0 | 0x10000 | 2 MB | Firmware |
+| tiles | 0x210000 | 5.9 MB | Tile pixel data (TCACHE04) |
 
 ### Runtime PSRAM budget
 

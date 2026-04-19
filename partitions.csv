@@ -1,5 +1,5 @@
 # Name,   Type, SubType, Offset,   Size,
 # OTA removed — USB flash only; tiles partition replaces fatfs + app1.
 nvs,      data, nvs,     0x9000,   0x4000,
-app0,     app,  factory, 0x10000,  0x300000,
-tiles,    data, 0xff,    0x310000, 0x4F0000,
+app0,     app,  factory, 0x10000,  0x200000,
+tiles,    data, 0xff,    0x210000, 0x5F0000,
