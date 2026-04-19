@@ -146,12 +146,27 @@ class _Acc:
         self.scaled  = 0
 
     def _pack_tile(self, w, h, raw):
-        """Return (nw, nh, pixels) — downscale oversized tiles to power-of-2."""
+        """Return (nw, nh, pixels).
+
+        Oversized tiles (>TC_MAX_DIM on either axis) are downscaled to
+        power-of-2 target dims using majority-vote area averaging, then stored
+        with the original column height (h) as stride.  The renderer uses
+        tiles[i].dim.height as the column stride, so we must not change it;
+        storing nw columns × h bytes (with valid data in the first nh bytes of
+        each column) lets col*orig_h addressing remain correct.  Bytes nh..h-1
+        per column are zero-padded and never accessed (picsiz row mask = nh-1).
+        Fit tiles (≤TC_MAX_DIM) are stored as-is at their original dimensions.
+        """
         if w > TC_MAX_DIM or h > TC_MAX_DIM:
             nw = _target_dim(w, TC_MAX_DIM)
             nh = _target_dim(h, TC_MAX_DIM)
             self.scaled += 1
-            return nw, nh, _downscale_mode(raw, w, h, nw, nh)
+            # Downscale to nw×nh, then lay out as nw columns × h bytes.
+            tight = _downscale_mode(raw, w, h, nw, nh)
+            buf = bytearray(nw * h)   # zero-initialised; padding rows stay 0
+            for cx in range(nw):
+                buf[cx * h: cx * h + nh] = tight[cx * nh: (cx + 1) * nh]
+            return nw, nh, bytes(buf)
         return w, h, bytes(raw)
 
     def add(self, tile_idx, w, h, raw):
