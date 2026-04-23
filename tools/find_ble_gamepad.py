@@ -34,6 +34,7 @@ HID_SERVICE    = "00001812-0000-1000-8000-00805f9b34fb"
 HID_REPORT_CHR = "00002a4d-0000-1000-8000-00805f9b34fb"
 YAML_PATH      = Path(__file__).parent.parent / "esphome.yaml"
 MAP_PATH       = Path(__file__).parent / "gamepad_map.json"
+ADDR_CACHE     = Path(__file__).parent / ".ble_address_cache.json"
 
 _SIG_RE = re.compile(r"^0000[0-9a-f]{4}-0000-1000-8000-00805f9b34fb$", re.I)
 
@@ -93,22 +94,6 @@ def _diff_desc(idle: bytes, report: bytes) -> str:
     return "  ".join(parts) if parts else "(no change)"
 
 
-def _print_report_row(report: bytes, idle: bytes | None) -> None:
-    n = len(report)
-    changed = [idle[i] != report[i] for i in range(n)] if idle and len(idle) == n else [False]*n
-    hex_row = " ".join(_fmt_byte(report[i], changed[i]) for i in range(n))
-    print(f"  {hex_row}")
-    for i in range(n):
-        if changed[i]:
-            old = idle[i] if idle else 0
-            diff = old ^ report[i]
-            bits = [b for b in range(8) if diff & (1 << b)]
-            set_b = [b for b in bits if report[i] & (1 << b)]
-            clr_b = [b for b in bits if not (report[i] & (1 << b))]
-            parts = []
-            if set_b: parts.append(f"set bits {set_b}")
-            if clr_b: parts.append(f"clr bits {clr_b}")
-            print(f"    byte[{i}]  {old:02X}({_fmt_bits(old)}) → {report[i]:02X}({_fmt_bits(report[i])})  {' '.join(parts)}")
 
 
 # ── scan mode ──────────────────────────────────────────────────────────────────
@@ -220,16 +205,33 @@ async def _scan_main(scan_time: int) -> None:
 
 # ── map mode ───────────────────────────────────────────────────────────────────
 
-async def _find_device(name_filter: str | None, scan_time: int) -> BLEDevice | None:
-    # Check if already connected to macOS (paired device may not advertise).
+def _cache_load() -> dict[str, str]:
+    try:
+        return json.loads(ADDR_CACHE.read_text())
+    except Exception:
+        return {}
+
+def _cache_save(name: str, address: str) -> None:
+    c = _cache_load()
+    c[name.lower()] = address
+    ADDR_CACHE.write_text(json.dumps(c, indent=2))
+
+
+async def _find_device(name_filter: str | None, scan_time: int) -> BLEDevice | str | None:
+    # Try cached address first — works when device is already connected/bonded to macOS
+    # and not actively advertising (BleakScanner won't see it).
     if name_filter:
-        connected = await BleakScanner.find_device_by_filter(
-            lambda d, _a: (d.name or "").lower() == name_filter.lower(),
-            timeout=2.0,
-        )
-        if connected:
-            print(f"Found (already connected): {connected.name}  ({connected.address})")
-            return connected
+        cached = _cache_load().get(name_filter.lower())
+        if cached:
+            print(f"Trying cached address {cached}…")
+            try:
+                tmp = BleakClient(cached)
+                await tmp.connect(timeout=5.0)
+                await tmp.disconnect()
+                print(f"Found (via cache): {name_filter}  ({cached})")
+                return cached          # BleakClient accepts plain address string
+            except Exception as e:
+                print(f"Cache miss ({e}), falling back to scan…")
 
     print(f"Scanning {scan_time}s for BLE HID devices…")
     seen: dict[str, tuple[BLEDevice, AdvertisementData]] = {}
@@ -254,9 +256,12 @@ async def _find_device(name_filter: str | None, scan_time: int) -> BLEDevice | N
     if not candidates:
         print("No matching device found.")
         return None
+
     if len(candidates) == 1:
         dev, adv = candidates[0]
         print(f"Found: {adv.local_name or dev.name}  ({dev.address})")
+        if name_filter:
+            _cache_save(name_filter, dev.address)
         return dev
 
     print("Multiple candidates:")
@@ -265,7 +270,10 @@ async def _find_device(name_filter: str | None, scan_time: int) -> BLEDevice | N
     print("Select [1]: ", end="", flush=True)
     raw = input().strip()
     idx = (int(raw) - 1) if raw.isdigit() else 0
-    return candidates[idx][0]
+    dev, _ = candidates[idx]
+    if name_filter:
+        _cache_save(name_filter, dev.address)
+    return dev
 
 
 async def _map_main(device_name: str | None, scan_time: int) -> None:
