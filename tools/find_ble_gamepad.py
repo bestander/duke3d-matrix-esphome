@@ -58,57 +58,44 @@ GAME_ACTIONS = [
 def _is_sig(uuid: str) -> bool:
     return bool(_SIG_RE.match(uuid))
 
-
 def _custom_uuids(adv: AdvertisementData) -> list[str]:
     return [u.upper() for u in adv.service_uuids if not _is_sig(u)]
 
-
 def _has_hid(adv: AdvertisementData) -> bool:
     return any(u.lower() == HID_SERVICE for u in adv.service_uuids)
-
 
 def _fmt_byte(val: int, changed: bool) -> str:
     s = f"{val:02X}"
     return f"\033[1;33m{s}\033[0m" if changed else s
 
-
 def _fmt_bits(val: int) -> str:
     return "".join("1" if val & (1 << (7 - i)) else "." for i in range(8))
 
-
 def _diff_desc(idle: bytes, report: bytes) -> str:
-    """One-line summary of what changed from idle."""
     parts = []
     for i in range(min(len(idle), len(report))):
-        if idle[i] != report[i]:
-            diff = idle[i] ^ report[i]
-            bits = [b for b in range(8) if diff & (1 << b)]
-            set_bits  = [b for b in bits if report[i] & (1 << b)]
-            clr_bits  = [b for b in bits if not (report[i] & (1 << b))]
-            desc = f"[{i}] {idle[i]:02X}→{report[i]:02X}"
-            if set_bits:
-                desc += f" set:{','.join(map(str,set_bits))}"
-            if clr_bits:
-                desc += f" clr:{','.join(map(str,clr_bits))}"
-            parts.append(desc)
+        if idle[i] == report[i]:
+            continue
+        diff = idle[i] ^ report[i]
+        bits = [b for b in range(8) if diff & (1 << b)]
+        desc = f"[{i}] {idle[i]:02X}→{report[i]:02X}"
+        s = [b for b in bits if report[i] & (1 << b)]
+        c = [b for b in bits if not (report[i] & (1 << b))]
+        if s: desc += f" set:{','.join(map(str,s))}"
+        if c: desc += f" clr:{','.join(map(str,c))}"
+        parts.append(desc)
     return "  ".join(parts) if parts else "(no change)"
-
-
 
 
 # ── scan mode ──────────────────────────────────────────────────────────────────
 
 async def _do_scan(seconds: int) -> list[tuple[BLEDevice, AdvertisementData]]:
     seen: dict[str, tuple[BLEDevice, AdvertisementData]] = {}
-
-    def _cb(dev: BLEDevice, adv: AdvertisementData) -> None:
-        seen[dev.address] = (dev, adv)
-
-    scanner = BleakScanner(_cb)
+    def _cb(d: BLEDevice, a: AdvertisementData) -> None:
+        seen[d.address] = (d, a)
     print(f"Scanning for {seconds}s — press buttons on your controller to make it visible…\n")
-    await scanner.start()
-    await asyncio.sleep(seconds)
-    await scanner.stop()
+    async with BleakScanner(_cb):
+        await asyncio.sleep(seconds)
     return list(seen.values())
 
 
@@ -220,20 +207,32 @@ def _cache_save(name: str, address: str) -> None:
 async def _find_device(name_filter: str | None, scan_time: int) -> BLEDevice | str | None:
     # Try cached address first — works when device is already connected/bonded to macOS
     # and not actively advertising (BleakScanner won't see it).
-    if name_filter:
-        cached = _cache_load().get(name_filter.lower())
-        if cached:
-            print(f"Using cached address {cached} (skipping scan)")
-            return cached          # BleakClient accepts plain address string on macOS
+    # For a cached address, do a quick targeted lookup (stops as soon as found).
+    # This is necessary because BleakClient(string) internally scans and hangs
+    # when the device is connected to macOS and not advertising.
+    cached = _cache_load().get(name_filter.lower()) if name_filter else None
+    quick_timeout = 6.0 if cached else None
 
-    print(f"Scanning {scan_time}s for BLE HID devices…")
+    print(f"Scanning for {name_filter or 'HID devices'}…")
     seen: dict[str, tuple[BLEDevice, AdvertisementData]] = {}
+    found_event = asyncio.Event()
 
     def _cb(dev: BLEDevice, adv: AdvertisementData) -> None:
         seen[dev.address] = (dev, adv)
+        if cached and dev.address.lower() == cached.lower():
+            found_event.set()
+        elif name_filter and (adv.local_name or dev.name or "").lower() == name_filter.lower():
+            found_event.set()
 
-    async with BleakScanner(_cb):
-        await asyncio.sleep(scan_time)
+    scanner = BleakScanner(_cb)
+    await scanner.start()
+    try:
+        timeout = quick_timeout or scan_time
+        await asyncio.wait_for(found_event.wait(), timeout=timeout)
+    except asyncio.TimeoutError:
+        pass
+    finally:
+        await scanner.stop()
 
     candidates = [(d, a) for d, a in seen.values() if _has_hid(a)]
     if name_filter:
@@ -241,13 +240,16 @@ async def _find_device(name_filter: str | None, scan_time: int) -> BLEDevice | s
                  if (a.local_name or d.name or "").lower() == name_filter.lower()]
         if named:
             candidates = named
-
     if not candidates and name_filter:
         candidates = [(d, a) for d, a in seen.values()
                       if (a.local_name or d.name or "").lower() == name_filter.lower()]
+    # Also accept a cached address hit even without name match
+    if not candidates and cached:
+        candidates = [(d, a) for d, a in seen.values()
+                      if d.address.lower() == cached.lower()]
 
     if not candidates:
-        print("No matching device found.")
+        print("Device not found — make sure it is powered on and in range.")
         return None
 
     if len(candidates) == 1:
