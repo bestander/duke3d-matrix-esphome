@@ -221,6 +221,16 @@ async def _scan_main(scan_time: int) -> None:
 # ── map mode ───────────────────────────────────────────────────────────────────
 
 async def _find_device(name_filter: str | None, scan_time: int) -> BLEDevice | None:
+    # Check if already connected to macOS (paired device may not advertise).
+    if name_filter:
+        connected = await BleakScanner.find_device_by_filter(
+            lambda d, _a: (d.name or "").lower() == name_filter.lower(),
+            timeout=2.0,
+        )
+        if connected:
+            print(f"Found (already connected): {connected.name}  ({connected.address})")
+            return connected
+
     print(f"Scanning {scan_time}s for BLE HID devices…")
     seen: dict[str, tuple[BLEDevice, AdvertisementData]] = {}
 
@@ -237,11 +247,9 @@ async def _find_device(name_filter: str | None, scan_time: int) -> BLEDevice | N
         if named:
             candidates = named
 
-    if not candidates:
-        # fallback: any device matching the name, even without HID service advertised
-        if name_filter:
-            candidates = [(d, a) for d, a in seen.values()
-                          if (a.local_name or d.name or "").lower() == name_filter.lower()]
+    if not candidates and name_filter:
+        candidates = [(d, a) for d, a in seen.values()
+                      if (a.local_name or d.name or "").lower() == name_filter.lower()]
 
     if not candidates:
         print("No matching device found.")
@@ -269,11 +277,11 @@ async def _map_main(device_name: str | None, scan_time: int) -> None:
     report_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=64)
     latest: list[bytes] = [b""]
 
-    def _notify(char: BleakGATTCharacteristic, data: bytearray) -> None:
+    def _notify(char: BleakGATTCharacteristic, data: bytearray, label: str = "") -> None:
         b = bytes(data)
         latest[0] = b
         try:
-            report_queue.put_nowait(b)
+            report_queue.put_nowait((label, b))
         except asyncio.QueueFull:
             pass
 
@@ -292,31 +300,28 @@ async def _map_main(device_name: str | None, scan_time: int) -> None:
 
         print()
 
-        # Subscribe to all HID Report characteristics.
-        # Try notify first; fall back to indicate; also try any 0x2A4D regardless of service.
+        # Subscribe to every notifiable/indicatable characteristic across all services.
+        # Cheap controllers often use vendor-specific UUIDs instead of standard 0x2A4D.
         subscribed = 0
-        tried: set[int] = set()
+        char_labels: dict[int, str] = {}  # handle → short label for display
         for svc in client.services:
             for char in svc.characteristics:
-                if char.uuid.lower() != HID_REPORT_CHR:
-                    continue
-                if char.handle in tried:
-                    continue
-                tried.add(char.handle)
                 props = char.properties
-                if "notify" in props or "indicate" in props:
-                    try:
-                        await client.start_notify(char, _notify)
-                        print(f"  Subscribed to {char.uuid} handle={char.handle} ({svc.description})")
-                        subscribed += 1
-                    except Exception as e:
-                        print(f"  Warning: handle {char.handle}: {e}")
+                if "notify" not in props and "indicate" not in props:
+                    continue
+                label = f"{char.uuid[:8]}(h{char.handle})"
+                try:
+                    await client.start_notify(char, lambda c, d, lbl=label: _notify(c, d, lbl))
+                    char_labels[char.handle] = label
+                    print(f"  Subscribed to {char.uuid}  handle={char.handle}  [{svc.description}]")
+                    subscribed += 1
+                except Exception as e:
+                    print(f"  Warning: handle {char.handle}: {e}")
 
         if subscribed == 0:
-            print("No notifiable HID Report characteristics found.")
-            print("The controller may require pairing/bonding before exposing input reports.")
+            print("No notifiable characteristics found at all.")
             return
-        print(f"\nSubscribed to {subscribed} HID report characteristic(s).\n")
+        print(f"\nSubscribed to {subscribed} characteristic(s).\n")
 
         # ── Capture baseline ────────────────────────────────────────────────
         print("Keep controller IDLE (no buttons) for 3 seconds to capture baseline…")
@@ -347,15 +352,15 @@ async def _map_main(device_name: str | None, scan_time: int) -> None:
             nonlocal last_printed
             while live_task_running:
                 try:
-                    report = await asyncio.wait_for(report_queue.get(), timeout=0.15)
+                    lbl, report = await asyncio.wait_for(report_queue.get(), timeout=0.15)
                 except asyncio.TimeoutError:
                     continue
                 if report == last_printed:
                     continue
                 last_printed = report
                 diff = _diff_desc(idle, report)
-                row = " ".join(_fmt_byte(report[i], idle[i] != report[i]) for i in range(n_bytes))
-                print(f"  {row}   {diff}")
+                row = " ".join(_fmt_byte(report[i], idle[i] != report[i]) for i in range(len(report)))
+                print(f"  [{lbl}]  {row}   {diff}")
 
         live_task = asyncio.ensure_future(_live())
         try:
@@ -387,6 +392,7 @@ async def _map_main(device_name: str | None, scan_time: int) -> None:
                 report_queue.get_nowait()
 
             await loop.run_in_executor(None, sys.stdin.readline)
+            await asyncio.sleep(0.05)  # let final notify flush
 
             cap = latest[0]
             if not cap or cap == idle:
