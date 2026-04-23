@@ -286,7 +286,8 @@ async def _map_main(device_name: str | None, scan_time: int) -> None:
         except asyncio.QueueFull:
             pass
 
-    print(f"Connecting to {dev.name or dev.address}…")
+    dev_label = dev if isinstance(dev, str) else (dev.name or dev.address)
+    print(f"Connecting to {dev_label}…")
     client = BleakClient(dev)
     try:
         await client.connect()
