@@ -281,23 +281,40 @@ async def _map_main(device_name: str | None, scan_time: int) -> None:
     async with BleakClient(dev) as client:
         print("Connected!\n")
 
-        # Subscribe to all HID Report characteristics
-        subscribed = 0
+        # Dump all services and characteristics for diagnostics
+        print("GATT services discovered:")
         for svc in client.services:
-            if svc.uuid.lower() != HID_SERVICE:
-                continue
+            print(f"  Service {svc.uuid}  ({svc.description})")
             for char in svc.characteristics:
-                if char.uuid.lower() == HID_REPORT_CHR and "notify" in char.properties:
+                print(f"    Char {char.uuid}  handle={char.handle}  props={char.properties}")
+
+        print()
+
+        # Subscribe to all HID Report characteristics.
+        # Try notify first; fall back to indicate; also try any 0x2A4D regardless of service.
+        subscribed = 0
+        tried: set[int] = set()
+        for svc in client.services:
+            for char in svc.characteristics:
+                if char.uuid.lower() != HID_REPORT_CHR:
+                    continue
+                if char.handle in tried:
+                    continue
+                tried.add(char.handle)
+                props = char.properties
+                if "notify" in props or "indicate" in props:
                     try:
                         await client.start_notify(char, _notify)
+                        print(f"  Subscribed to {char.uuid} handle={char.handle} ({svc.description})")
                         subscribed += 1
                     except Exception as e:
-                        print(f"  Warning: could not subscribe to handle {char.handle}: {e}")
+                        print(f"  Warning: handle {char.handle}: {e}")
 
         if subscribed == 0:
             print("No notifiable HID Report characteristics found.")
+            print("The controller may require pairing/bonding before exposing input reports.")
             return
-        print(f"Subscribed to {subscribed} HID report characteristic(s).\n")
+        print(f"\nSubscribed to {subscribed} HID report characteristic(s).\n")
 
         # ── Capture baseline ────────────────────────────────────────────────
         print("Keep controller IDLE (no buttons) for 3 seconds to capture baseline…")
