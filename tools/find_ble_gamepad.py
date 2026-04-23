@@ -223,15 +223,8 @@ async def _find_device(name_filter: str | None, scan_time: int) -> BLEDevice | s
     if name_filter:
         cached = _cache_load().get(name_filter.lower())
         if cached:
-            print(f"Trying cached address {cached}…")
-            try:
-                tmp = BleakClient(cached)
-                await tmp.connect(timeout=5.0)
-                await tmp.disconnect()
-                print(f"Found (via cache): {name_filter}  ({cached})")
-                return cached          # BleakClient accepts plain address string
-            except Exception as e:
-                print(f"Cache miss ({e}), falling back to scan…")
+            print(f"Using cached address {cached} (skipping scan)")
+            return cached          # BleakClient accepts plain address string on macOS
 
     print(f"Scanning {scan_time}s for BLE HID devices…")
     seen: dict[str, tuple[BLEDevice, AdvertisementData]] = {}
@@ -472,7 +465,11 @@ async def _map_main(device_name: str | None, scan_time: int) -> None:
     finally:
         if client.is_connected:
             print("\nDisconnecting…")
-            await client.disconnect()
+            try:
+                await client.disconnect()
+                await asyncio.sleep(0.5)  # let CoreBluetooth process cancelPeripheralConnection
+            except Exception:
+                pass
             print("Disconnected.")
 
 
