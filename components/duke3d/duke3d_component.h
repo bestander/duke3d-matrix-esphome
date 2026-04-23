@@ -31,6 +31,7 @@ public:
     void set_time_id(time::RealTimeClock *t) { time_id_ = t; }
     /// Target BLE controller by advertised 128-bit service UUID or device name.
     void set_ble_gamepad_uuid(const std::string &v) { ble_gamepad_uuid_ = v; }
+    void set_ble_gamepad_name(const std::string &v) { ble_gamepad_name_ = v; }
 
     /// Engine hook: queue cooperative HA / WiFi sync (debounced).
     void queue_ha_sync_if_eligible(uint8_t g_mode);
@@ -50,6 +51,7 @@ private:
     uint8_t audio_output_percent_ = 50;
     time::RealTimeClock *time_id_{nullptr};
     std::string ble_gamepad_uuid_;
+    std::string ble_gamepad_name_;
     bool bootstrap_released_ = false;
     int64_t first_wifi_connected_at_us_ = 0;
     WifiWindowState wifi_state_ = WifiWindowState::STOPPED;

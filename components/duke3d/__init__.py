@@ -16,6 +16,7 @@ CONF_WIFI_HA_SYNC              = "wifi_ha_sync"
 CONF_TIME_ID                 = "time_id"
 CONF_AUDIO_OUTPUT_PERCENT    = "audio_output_percent"
 CONF_BLE_GAMEPAD_UUID        = "ble_gamepad_uuid"
+CONF_BLE_GAMEPAD_NAME        = "ble_gamepad_name"
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(Duke3DClass),
@@ -31,6 +32,7 @@ CONFIG_SCHEMA = cv.Schema({
         cv.int_, cv.Range(min=0, max=100)
     ),
     cv.Optional(CONF_BLE_GAMEPAD_UUID, default=""): cv.string,
+    cv.Optional(CONF_BLE_GAMEPAD_NAME, default=""): cv.string,
 }).extend(cv.COMPONENT_SCHEMA)
 
 async def to_code(config):
@@ -45,6 +47,7 @@ async def to_code(config):
     cg.add(var.set_wifi_ha_sync(config[CONF_WIFI_HA_SYNC]))
     cg.add(var.set_audio_output_percent(config[CONF_AUDIO_OUTPUT_PERCENT]))
     cg.add(var.set_ble_gamepad_uuid(config[CONF_BLE_GAMEPAD_UUID]))
+    cg.add(var.set_ble_gamepad_name(config[CONF_BLE_GAMEPAD_NAME]))
     if CONF_TIME_ID in config:
         t = await cg.get_variable(config[CONF_TIME_ID])
         cg.add(var.set_time_id(t))

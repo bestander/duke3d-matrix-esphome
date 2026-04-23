@@ -31,6 +31,8 @@ static bool s_nimble_started = false;
 
 static bool s_use_uuid = false;
 static ble_uuid128_t s_target_uuid = {};
+static bool s_use_name = false;
+static char s_target_name[64] = {};
 
 
 static uint16_t s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
@@ -94,6 +96,8 @@ static bool adv_matches_target(const uint8_t *data, uint8_t len,
                       v[7],v[6],v[5],v[4],v[3],v[2],v[1],v[0]);
     if (s_use_uuid && ble_uuid_cmp(&fields.uuids128[i].u, &s_target_uuid.u) == 0) matched = true;
   }
+  if (!matched && s_use_name && name_out[0] != '\0')
+    matched = (strncmp(name_out, s_target_name, sizeof(s_target_name)) == 0);
   return matched;
 }
 
@@ -184,7 +188,8 @@ static void start_scan(void) {
     ESP_LOGW(TAG, "ble_gap_disc failed: rc=%d", rc);
     return;
   }
-  ESP_LOGI(TAG, "Scanning for BLE gamepad (target=%s)...", target_str);
+  ESP_LOGI(TAG, "Scanning for BLE gamepad (uuid=%s name=%s)...",
+           target_str, s_use_name ? s_target_name : "(none)");
 }
 
 static int gap_event_cb(struct ble_gap_event *event, void *arg) {
@@ -287,6 +292,14 @@ static void nimble_host_task(void *param) {
 }
 
 }  // namespace
+
+void nimble_gamepad_set_target_name(const char *name) {
+  if (name == nullptr || name[0] == '\0') return;
+  strncpy(s_target_name, name, sizeof(s_target_name) - 1);
+  s_target_name[sizeof(s_target_name) - 1] = '\0';
+  s_use_name = true;
+  ESP_LOGI(TAG, "Configured BLE target name: %s", s_target_name);
+}
 
 void nimble_gamepad_set_target_uuid(const char *uuid_str) {
   s_use_uuid = parse_uuid128(uuid_str, &s_target_uuid);

@@ -113,7 +113,7 @@ duke3d:
   wifi_ha_sync: false
   # Min seconds between HA WiFi syncs triggered by non-demo level loads (debounce).
   wifi_sync_min_interval_s: 90
-  ble_gamepad_uuid: "3CFDC64B-DF67-DB45-01FD-D31FAE4FBEAE"
+  ble_gamepad_name: "ShanWan Q36"
 
 # Matrix Portal S3 GPIO strip: A1=GPIO3, A2=GPIO9, A3=GPIO10, A4=GPIO11, TX=GPIO18, RX=GPIO8
 # JST 3-pin connector: A0=GPIO12

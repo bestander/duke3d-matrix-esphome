@@ -149,6 +149,9 @@ void Duke3DComponent::setup() {
     if (!ble_gamepad_uuid_.empty()) {
         nimble_gamepad_set_target_uuid(ble_gamepad_uuid_.c_str());
     }
+    if (!ble_gamepad_name_.empty()) {
+        nimble_gamepad_set_target_name(ble_gamepad_name_.c_str());
+    }
     nimble_gamepad_init();
 
 #ifdef DUKE3D_FLASH_TILES
