@@ -152,11 +152,11 @@ void Hud::render(MatrixType& d) {
         draw_char(d, wx, HUD_TOP, font_index(water_str[i]), 80, 180, 255);
     draw_char(d, wx, HUD_TOP, FONT_IDX_DEGREE, 80, 180, 255);
 
-    // BLE status icon — top-right corner of Band 0 (x=58).
+    // BLE status icon — bottom-right corner (x=59, y=57, icon rows y=57-63).
     // Connected: solid blue. Searching: blink at 2 Hz.
     bool draw_ble = ble_connected || ((esp_timer_get_time() / 500000LL) % 2 == 0);
     if (draw_ble)
-        draw_char(d, 58, HUD_TOP, FONT_IDX_BLE, 0, 100, 255);
+        draw_char(d, 59, 57, FONT_IDX_BLE, 0, 100, 255);
 
     // ── Band 1 (y=HUD_TOP+8): ↓min°  ↑max° ──────────────────────────────
     draw_char(d, 2, HUD_TOP + 8, FONT_IDX_DOWN, 100, 180, 255);

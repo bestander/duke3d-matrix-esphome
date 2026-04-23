@@ -12,14 +12,14 @@ extern "C" {
 
 static const char *TAG = "flash_tiles";
 
-// TCACHE04 layout — must match make_tile_bin.py and tilecache.cpp
+// TCACHE05 layout — must match make_tile_bin.py
 #define FT_MAXTILES  9216
-#define FT_MAGIC     "TCACHE04"
+#define FT_MAGIC     "TCACHE05"
 #define FT_ABSENT    0xFFFFFFFFu
-// entry bits: [31:29]=log2(w)  [28:26]=log2(h)  [25:0]=byte offset
-#define FT_OFF(e)    ((e) & 0x03FFFFFFu)
-#define FT_LW(e)     (((e) >> 29) & 7u)
-#define FT_LH(e)     (((e) >> 26) & 7u)
+// entry bits: [31:28]=log2(w)  [27:24]=log2(h)  [23:0]=byte offset
+#define FT_OFF(e)    ((e) & 0x00FFFFFFu)
+#define FT_LW(e)     (((e) >> 28) & 0xFu)
+#define FT_LH(e)     (((e) >> 24) & 0xFu)
 
 static esp_partition_mmap_handle_t s_mmap_handle;
 static const void *s_mmap_base = NULL;  // set by flash_tiles_premap()
@@ -75,10 +75,16 @@ int flash_tiles_init(void)
         waloff[i]     = (uint8_t *)s_mmap_base + FT_OFF(e);
         picsiz[i]     = (uint8_t)(FT_LW(e) | (FT_LH(e) << 4));
         tiles[i].lock = 255;
-        // tiles[i].dim.width/height intentionally NOT updated — the renderer uses
-        // dim.height as the column stride and rotatesprite uses dim.width/height for
-        // sprite sizing. Oversized tiles are stored with stride = orig_h (padding
-        // columns to orig_h bytes) so col * dim.height addressing stays correct.
+        // Sky tiles (89-95) are stored with height truncated to TC_MAX_DIM rows.
+        // The wall renderer uses picsiz-based column stride (1<<(picsiz>>4)), so the
+        // truncated layout is correct. But dim.height (used as stride by the column
+        // rasterizer when height is non-power-of-2) must match the stored row count.
+        switch (i) {
+            case 89: case 90: case 91: case 92: case 93: case 95:
+                tiles[i].dim.height = (int16_t)(1u << FT_LH(e));
+                break;
+            default: break;
+        }
         count++;
     }
 

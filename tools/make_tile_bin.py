@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""make_tile_bin.py — Build TCACHE04 tile binary from DUKE3D.GRP for the flash 'tiles' partition.
+"""make_tile_bin.py — Build TCACHE05 tile binary from DUKE3D.GRP for the flash 'tiles' partition.
 
-All TILES*.ART tiles are packed:
-  - Tiles whose original dims both fit within TC_MAX_DIM are stored as-is.
-  - Oversized tiles (either axis > TC_MAX_DIM) are downscaled to the largest
-    power-of-2 ≤ TC_MAX_DIM on each axis using majority-vote mode downscaling
-    (palette-correct area averaging: picks the most common palette index in each
-    source block, far better than nearest-neighbour for indexed-colour images).
+Fit tiles (both axes ≤ TC_MAX_DIM) and tiles in FORCE_FULL_TILES are stored at
+their original dimensions.  All other oversized tiles are excluded; the runtime
+GRP/SD path handles them via the existing PSRAM tile cache.
+
+Entry format (TCACHE05): [31:28]=log2(w) [27:24]=log2(h) [23:0]=byte_offset
+(4-bit log2 fields support dims up to 2^15=32768; 24-bit offset covers 16 MB.)
 
 Usage:
   python3 tools/make_tile_bin.py --grp DUKE3D.GRP --out tools/tiles.bin
@@ -17,11 +17,32 @@ import struct
 import sys
 
 TC_MAXTILES    = 9216
-TC_MAX_DIM     = 128   # must match flash_tiles.cpp / tiles.c MAX_TILE_DIM
-TC_MAGIC_OK    = b"TCACHE04"
+TC_MAX_DIM     = 128   # must match flash_tiles.cpp
+TC_MAGIC_OK    = b"TCACHE05"
 TC_MAGIC_WIP   = b"TCBUILD!"
 TC_ABSENT      = 0xFFFFFFFF
 TC_HEADER_SIZE = 16 + TC_MAXTILES * 4   # magic(8) + grp_size(4) + pad(4) + entry_table
+
+# Oversized tiles stored at full original size in flash.
+# Storing them in flash bypasses the tiny ~28 KB PSRAM tile cache (eviction causes artifacts).
+FORCE_FULL_TILES = {
+    144, 145, 209, 911, 1108, 1640, 1657, 1781, 1782, 1787,
+    1962, 1963, 2047, 2051, 2052, 2300, 2324, 2325, 2326, 2327, 2457,
+    2445, 2456,
+    2462, 2465, 2492, 2493, 2494, 2497, 2499, 2521, 2522, 2528, 2529, 2536,
+    2544, 2564, 2566, 2568, 2570, 2571, 2572, 2574, 2576, 2616,
+    2617, 2618, 2619, 2632, 2641, 2642, 2646, 2647, 2661, 2662,
+    2666, 2667, 2671, 2680, 2681, 2682, 2684, 2685,
+    3240, 3241, 3242, 3243, 3244, 3260,
+    3263, 3264, 3265, 3266, 3267, 3268,
+    3281,  # LOADSCREEN — shown before every level load
+}
+
+# Sky tiles: w == TC_MAX_DIM, h > TC_MAX_DIM (38–51 KB each, exceed PSRAM tile cache).
+# Stored with only the first TC_MAX_DIM rows per column; picsiz encodes log2(TC_MAX_DIM)
+# so the wall renderer's picsiz-based column stride is correct.
+# flash_tiles.cpp must update dim.height for these tile IDs to match the stored row count.
+HEIGHT_TRUNCATE_TILES = {89, 90, 91, 92, 93, 95}
 
 
 # ---------------------------------------------------------------------------
@@ -35,60 +56,15 @@ def _ilog2(v):
         v >>= 1
     return r
 
-def _pow2_floor(v):
-    """Largest power of 2 that is ≤ v (minimum 1)."""
-    v = max(v, 1)
-    r = 1
-    while r * 2 <= v:
-        r *= 2
-    return r
-
-def _target_dim(orig, max_dim):
-    """Downscale target: original dim if ≤ max_dim, else largest power-of-2 ≤ max_dim."""
-    if orig <= max_dim:
-        return orig
-    return _pow2_floor(max_dim)
-
 def _tc_make(lw, lh, off):
-    return ((lw & 7) << 29) | ((lh & 7) << 26) | (off & 0x03FFFFFF)
+    # [31:28]=log2(w)  [27:24]=log2(h)  [23:0]=offset
+    return ((lw & 0xF) << 28) | ((lh & 0xF) << 24) | (off & 0x00FFFFFF)
 
-
-# ---------------------------------------------------------------------------
-# Downscaling — majority-vote mode (palette-correct area averaging)
-# ---------------------------------------------------------------------------
-
-def _downscale_mode(src, orig_w, orig_h, new_w, new_h):
-    """Downscale indexed-colour tile using majority-vote in each source block.
-
-    For each output pixel (ox, oy) we collect all source pixels in the
-    corresponding block of the column-major source (x*orig_h + y layout) and
-    pick the most frequent palette index.  Ties are broken by lowest index for
-    determinism.  This produces sharper, less aliased results than nearest-
-    neighbour for large downscale factors while remaining palette-correct.
-    """
-    dst = bytearray(new_w * new_h)
-    for ox in range(new_w):
-        sx0 = (ox * orig_w) // new_w
-        sx1 = ((ox + 1) * orig_w + new_w - 1) // new_w   # ceil
-        sx1 = min(sx1, orig_w)
-        if sx1 <= sx0:
-            sx1 = sx0 + 1
-        for oy in range(new_h):
-            sy0 = (oy * orig_h) // new_h
-            sy1 = ((oy + 1) * orig_h + new_h - 1) // new_h
-            sy1 = min(sy1, orig_h)
-            if sy1 <= sy0:
-                sy1 = sy0 + 1
-            counts = {}
-            for sx in range(sx0, sx1):
-                base = sx * orig_h
-                for sy in range(sy0, sy1):
-                    p = src[base + sy]
-                    counts[p] = counts.get(p, 0) + 1
-            # Most frequent; tie → smallest index
-            best = max(counts, key=lambda k: (counts[k], -k))
-            dst[ox * new_h + oy] = best
-    return bytes(dst)
+def _truncate_columns(raw, w, h, stored_h):
+    out = bytearray()
+    for col in range(w):
+        out.extend(raw[col * h: col * h + stored_h])
+    return bytes(out)
 
 
 # ---------------------------------------------------------------------------
@@ -143,49 +119,31 @@ class _Acc:
         self.pixels  = bytearray()
         self.offset  = TC_HEADER_SIZE
         self.count   = 0
-        self.scaled  = 0
-
-    def _pack_tile(self, w, h, raw):
-        """Return (nw, nh, pixels).
-
-        Oversized tiles (>TC_MAX_DIM on either axis) are downscaled to
-        power-of-2 target dims using majority-vote area averaging, then stored
-        with the original column height (h) as stride.  The renderer uses
-        tiles[i].dim.height as the column stride, so we must not change it;
-        storing nw columns × h bytes (with valid data in the first nh bytes of
-        each column) lets col*orig_h addressing remain correct.  Bytes nh..h-1
-        per column are zero-padded and never accessed (picsiz row mask = nh-1).
-        Fit tiles (≤TC_MAX_DIM) are stored as-is at their original dimensions.
-        """
-        if w > TC_MAX_DIM or h > TC_MAX_DIM:
-            nw = _target_dim(w, TC_MAX_DIM)
-            nh = _target_dim(h, TC_MAX_DIM)
-            self.scaled += 1
-            # Downscale to nw×nh, then lay out as nw columns × h bytes.
-            tight = _downscale_mode(raw, w, h, nw, nh)
-            buf = bytearray(nw * h)   # zero-initialised; padding rows stay 0
-            for cx in range(nw):
-                buf[cx * h: cx * h + nh] = tight[cx * nh: (cx + 1) * nh]
-            return nw, nh, bytes(buf)
-        return w, h, bytes(raw)
-
+        self.skipped = 0
     def add(self, tile_idx, w, h, raw):
         if w <= 0 or h <= 0 or tile_idx >= TC_MAXTILES or len(raw) < w * h:
             return
-        if self.offset > 0x03FFFFFF:
-            print(f"  WARNING: tile {tile_idx} offset 0x{self.offset:X} exceeds 26-bit limit",
+        oversized = w > TC_MAX_DIM or h > TC_MAX_DIM
+        if oversized and tile_idx not in FORCE_FULL_TILES \
+                     and tile_idx not in HEIGHT_TRUNCATE_TILES:
+            self.skipped += 1
+            return
+        stored_h = h
+        if tile_idx in HEIGHT_TRUNCATE_TILES and h > TC_MAX_DIM:
+            stored_h = TC_MAX_DIM
+            trunc = bytearray()
+            for col in range(w):
+                trunc.extend(raw[col * h: col * h + stored_h])
+            raw = bytes(trunc)
+        if self.offset > 0x00FFFFFF:
+            print(f"  WARNING: tile {tile_idx} offset exceeds 24-bit limit",
                   file=sys.stderr)
             return
-        nw, nh, px = self._pack_tile(w, h, raw)
-        self.entries[tile_idx] = _tc_make(_ilog2(nw), _ilog2(nh), self.offset)
-        self.pixels.extend(px)
-        self.offset += len(px)
+        self.entries[tile_idx] = _tc_make(_ilog2(w), _ilog2(stored_h), self.offset)
+        self.pixels.extend(raw[:w * stored_h])
+        self.offset += w * stored_h
         self.count  += 1
 
-
-# ---------------------------------------------------------------------------
-# Binary I/O
-# ---------------------------------------------------------------------------
 
 def _is_cached(path, grp_size):
     try:
@@ -210,10 +168,6 @@ def _write_output(path, grp_size, acc):
         f.write(TC_MAGIC_OK)
 
 
-# ---------------------------------------------------------------------------
-# Main build
-# ---------------------------------------------------------------------------
-
 def build(grp_path, out_path):
     grp_size = os.path.getsize(grp_path)
     if _is_cached(out_path, grp_size):
@@ -235,7 +189,7 @@ def build(grp_path, out_path):
         _parse_art(body[rel: rel + size], acc)
 
     total = TC_HEADER_SIZE + len(acc.pixels)
-    print(f"[make_tile_bin] {acc.count} tiles ({acc.scaled} downscaled), "
+    print(f"[make_tile_bin] {acc.count} tiles ({acc.skipped} oversized skipped), "
           f"{total / 1024:.1f} KB")
     _write_output(out_path, grp_size, acc)
     print(f"[make_tile_bin] wrote {out_path}")
