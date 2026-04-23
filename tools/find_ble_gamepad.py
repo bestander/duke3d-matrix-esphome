@@ -278,7 +278,9 @@ async def _map_main(device_name: str | None, scan_time: int) -> None:
             pass
 
     print(f"Connecting to {dev.name or dev.address}…")
-    async with BleakClient(dev) as client:
+    client = BleakClient(dev)
+    try:
+        await client.connect()
         print("Connected!\n")
 
         # Dump all services and characteristics for diagnostics
@@ -453,6 +455,11 @@ async def _map_main(device_name: str | None, scan_time: int) -> None:
         MAP_PATH.write_text(json.dumps(mapping, indent=2))
         print(f"\nFull mapping saved to {MAP_PATH}")
         print("\nIf the layout differs from the current ble_gamepad.cpp, update parse_report().")
+    finally:
+        if client.is_connected:
+            print("\nDisconnecting…")
+            await client.disconnect()
+            print("Disconnected.")
 
 
 # ── main ───────────────────────────────────────────────────────────────────────
