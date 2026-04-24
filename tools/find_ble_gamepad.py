@@ -1,18 +1,12 @@
 #!/usr/bin/env python3
-"""find_ble_gamepad.py — Scan for BLE gamepads on macOS and configure esphome.yaml.
+"""find_ble_gamepad.py — BLE gamepad scanner and button mapper for macOS.
 
-scan mode (default):
-  Scans for BLE devices, highlights HID controllers (service 0x1812), shows their
-  service UUIDs, then writes the chosen UUID into esphome.yaml.
+scan (default): find HID controllers, update esphome.yaml UUID.
+map  (--map):   connect and interactively map buttons to HID report bytes/bits.
 
-map mode (--map):
-  Connects to the controller and runs a guided session to map each game action to
-  HID report bytes/bits.  Prints a summary you can paste into ble_gamepad.cpp.
-
-Usage:
-  pip3 install bleak
+Usage:  pip3 install bleak
   python3 tools/find_ble_gamepad.py [--scan-time N]
-  python3 tools/find_ble_gamepad.py --map [--name "ShanWan Q36"] [--scan-time N]
+  python3 tools/find_ble_gamepad.py --map [--name "ShanWan Q36"]
 """
 import argparse
 import asyncio
@@ -180,14 +174,9 @@ async def _scan_main(scan_time: int) -> None:
                 print("\nNext step: esphome run esphome.yaml  (firmware reflash needed)")
     else:
         name = adv.local_name or dev.name or dev.address
-        print(f"\n{name} advertises only standard Bluetooth SIG UUIDs (e.g. 0x1812 HID).")
-        print("The ESP32 firmware matches on 128-bit custom UUIDs in the advertisement.")
-        print("No custom UUID found — the firmware cannot identify this device by UUID.")
-        print("\nOptions:")
-        print("  1. Check if the controller has a companion app that reveals its custom UUID.")
-        print("  2. Modify nimble_gamepad.cpp to also match by device name:")
-        print(f'     target name would be: "{adv.local_name or dev.name}"')
-        print("  3. Try scanning with --scan-time 20 and press buttons on the controller.")
+        print(f"\n{name} advertises only standard SIG UUIDs — no custom 128-bit UUID found.")
+        print(f"Options: 1) check companion app  2) match by name (use --map --name \"{name}\")"
+              f"  3) rescan with --scan-time 20")
 
 
 # ── map mode ───────────────────────────────────────────────────────────────────
@@ -205,11 +194,6 @@ def _cache_save(name: str, address: str) -> None:
 
 
 async def _find_device(name_filter: str | None, scan_time: int) -> BLEDevice | str | None:
-    # Try cached address first — works when device is already connected/bonded to macOS
-    # and not actively advertising (BleakScanner won't see it).
-    # For a cached address, do a quick targeted lookup (stops as soon as found).
-    # This is necessary because BleakClient(string) internally scans and hangs
-    # when the device is connected to macOS and not advertising.
     cached = _cache_load().get(name_filter.lower()) if name_filter else None
     quick_timeout = 6.0 if cached else None
 
@@ -325,16 +309,32 @@ async def _map_main(device_name: str | None, scan_time: int) -> None:
         if subscribed == 0:
             print("No notifiable characteristics found at all.")
             return
-        print(f"\nSubscribed to {subscribed} characteristic(s).\n")
+        print(f"\nSubscribed to {subscribed} characteristic(s).")
 
-        # ── Capture baseline ────────────────────────────────────────────────
-        print("Keep controller IDLE (no buttons) for 3 seconds to capture baseline…")
+        # Many BLE gamepads are silent until the host writes a start command.
+        for svc in client.services:
+            for char in svc.characteristics:
+                if "write" not in char.properties and "write-without-response" not in char.properties:
+                    continue
+                for cmd in [b"\x01", b"\x01\x00", b"\xa5\x00\x00\x00\x00"]:
+                    try:
+                        await client.write_gatt_char(char, cmd, response="write" in char.properties)
+                        await asyncio.sleep(0.1)
+                    except Exception:
+                        pass
+
+        print("\nKeep controller IDLE — waiting up to 10s for first report…")
         while not report_queue.empty():
             report_queue.get_nowait()
-        await asyncio.sleep(3.0)
+        for i in range(10):
+            await asyncio.sleep(1.0)
+            if latest[0]:
+                break
+            print(f"  {i+1}s…", end=" ", flush=True)
+        print()
         idle = latest[0]
         if not idle:
-            print("No HID reports received — is the controller awake?")
+            print("No reports received — try pressing a button, then re-run.")
             return
 
         n_bytes = len(idle)
