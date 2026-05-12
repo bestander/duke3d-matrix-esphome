@@ -18,7 +18,6 @@
 #include "tilecache.h"
 #include "flash_tiles.h"
 #include "input.h"
-#include "nimble_gamepad.h"
 #include <cstring>
 #include <dirent.h>
 #include <strings.h>
@@ -146,13 +145,6 @@ void Duke3DComponent::setup() {
 
     g_duke3d_component = this;
     input_init();
-    if (!ble_gamepad_uuid_.empty()) {
-        nimble_gamepad_set_target_uuid(ble_gamepad_uuid_.c_str());
-    }
-    if (!ble_gamepad_name_.empty()) {
-        nimble_gamepad_set_target_name(ble_gamepad_name_.c_str());
-    }
-    nimble_gamepad_init();
 
 #ifdef DUKE3D_FLASH_TILES
     // Must mmap from here (main task = internal-RAM stack).

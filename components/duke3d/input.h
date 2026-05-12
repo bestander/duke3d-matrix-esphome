@@ -1,7 +1,19 @@
 #pragma once
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
-#include "ble_gamepad.h"
+
+typedef struct {
+    bool forward;
+    bool back;
+    bool turn_left;
+    bool turn_right;
+    bool strafe_left;
+    bool strafe_right;
+    bool fire;
+    bool use;
+    bool open_map;
+    bool menu;
+} GamepadState;
 
 enum class InputEvent : uint8_t {
     NONE = 0,
@@ -25,10 +37,8 @@ void input_push_from_isr(InputEvent evt);
 // Called from game task (Core 1) each tick.
 InputEvent input_pop();
 
-// Held-button state — updated from BLE HID reports every ~8-16 ms.
-// Use this for movement/turning (held actions); use input_pop() for
-// one-shot events like menu navigation.
-// Thread-safe: written by NimBLE host task via ble_gamepad, read by game task.
+// Held-button state for movement/turning actions.
+// BLE/gamepad input stack is disabled, so this currently returns all-false state.
 static inline GamepadState input_get_state() {
-    return ble_gamepad_get_state();
+    return GamepadState{};
 }

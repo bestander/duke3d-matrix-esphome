@@ -53,18 +53,6 @@ esp32:
       # to be placed in PSRAM BSS segment instead of internal DRAM.
       # Without this, the engine arrays overflow internal DRAM by ~1.6MB.
       CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY: "y"
-      CONFIG_BT_NIMBLE_ENABLED: "y"
-      CONFIG_BT_ENABLED: "y"
-      CONFIG_BT_NIMBLE_MAX_CONNECTIONS: "1"
-      CONFIG_BT_NIMBLE_ROLE_CENTRAL: "y"
-      CONFIG_BT_NIMBLE_ROLE_PERIPHERAL: "n"
-      CONFIG_BT_NIMBLE_ROLE_BROADCASTER: "n"
-      CONFIG_BT_NIMBLE_ROLE_OBSERVER: "n"
-      CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL: "y"
-      CONFIG_BT_NIMBLE_NVS_PERSIST: "n"
-      CONFIG_BT_NIMBLE_SM_LEGACY: "y"
-      CONFIG_BT_NIMBLE_SM_SC: "y"
-      CONFIG_BT_NIMBLE_LOG_LEVEL: "1"
       # Keep WiFi lean during bootstrap; this internal RAM is needed by audio init.
       CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM: "4"
       CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM: "6"
@@ -97,7 +85,7 @@ hud:
 duke3d:
   id: game_engine
   # I2S output scale: 0 = mute, 100 = full mixer level (default 50 ≈ previous half-volume trim).
-  audio_output_percent: 1
+  audio_output_percent: 10
   # Wait for HA time sync before stopping WiFi at boot; otherwise clock stays 00:00 and sensors may not arrive.
   time_id: ha_time
   smoke_test: false
@@ -113,7 +101,6 @@ duke3d:
   wifi_ha_sync: false
   # Min seconds between HA WiFi syncs triggered by non-demo level loads (debounce).
   wifi_sync_min_interval_s: 90
-  ble_gamepad_name: "ShanWan Q36"
 
 # Matrix Portal S3 GPIO strip: A1=GPIO3, A2=GPIO9, A3=GPIO10, A4=GPIO11, TX=GPIO18, RX=GPIO8
 # JST 3-pin connector: A0=GPIO12
@@ -159,7 +146,6 @@ logger:
     S3: DEBUG
     wifi: WARN
     wifi_esp32: WARN
-    ble_gamepad: INFO
 
 time:
   - platform: homeassistant

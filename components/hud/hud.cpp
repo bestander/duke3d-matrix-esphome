@@ -5,7 +5,6 @@
 
 #ifndef DUKE3D_HOST_TEST
 #  include "esphome/core/log.h"
-#  include "esp_timer.h"
 static const char* TAG = "hud";
 #endif
 
@@ -92,11 +91,6 @@ void Hud::set_tide_low(const std::string& t) {
     tide_low_[sizeof(tide_low_) - 1] = '\0';
 }
 
-void Hud::set_ble_connected(bool connected) {
-    std::lock_guard<std::mutex> lk(data_mutex_);
-    ble_connected_ = connected;
-}
-
 void Hud::draw_char(MatrixType& d, int x, int y, int idx, uint8_t r, uint8_t g, uint8_t b) {
     for (int col = 0; col < 5; col++) {
         uint8_t bits = FONT_5X7[idx][col];
@@ -119,7 +113,6 @@ void Hud::render(MatrixType& d) {
     int h, m;
     float t_min, t_max, t_water;
     char tide_h[6], tide_l[6];
-    bool ble_connected;
     {
         std::lock_guard<std::mutex> lk(data_mutex_);
         h = hour_; m = minute_;
@@ -128,7 +121,6 @@ void Hud::render(MatrixType& d) {
         t_water = water_temp_;
         memcpy(tide_h, tide_high_, 6);
         memcpy(tide_l, tide_low_,  6);
-        ble_connected = ble_connected_;
     }
 
     // Clear HUD band (dark blue background)
@@ -151,12 +143,6 @@ void Hud::render(MatrixType& d) {
     for (int i = 0; water_str[i]; i++, wx += 6)
         draw_char(d, wx, HUD_TOP, font_index(water_str[i]), 80, 180, 255);
     draw_char(d, wx, HUD_TOP, FONT_IDX_DEGREE, 80, 180, 255);
-
-    // BLE status icon — bottom-right corner (x=61, y=57, icon rows y=57-63).
-    // Connected: solid blue. Searching: blink at 2 Hz.
-    bool draw_ble = ble_connected || ((esp_timer_get_time() / 500000LL) % 2 == 0);
-    if (draw_ble)
-        draw_char(d, 61, 57, FONT_IDX_BLE, 0, 100, 255);
 
     // ── Band 1 (y=HUD_TOP+8): ↓min°  ↑max° ──────────────────────────────
     draw_char(d, 2, HUD_TOP + 8, FONT_IDX_DOWN, 100, 180, 255);
