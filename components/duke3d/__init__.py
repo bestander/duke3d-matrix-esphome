@@ -15,6 +15,11 @@ CONF_WIFI_SYNC_MIN_INTERVAL_S = "wifi_sync_min_interval_s"
 CONF_WIFI_HA_SYNC              = "wifi_ha_sync"
 CONF_TIME_ID                 = "time_id"
 CONF_AUDIO_OUTPUT_PERCENT    = "audio_output_percent"
+CONF_PICO_UART_INPUT         = "pico_uart_input"
+CONF_PICO_UART_NUM           = "pico_uart_num"
+CONF_PICO_UART_TX_PIN        = "pico_uart_tx_pin"
+CONF_PICO_UART_RX_PIN        = "pico_uart_rx_pin"
+CONF_PICO_UART_BAUD_RATE     = "pico_uart_baud_rate"
 
 CONFIG_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.declare_id(Duke3DClass),
@@ -29,6 +34,11 @@ CONFIG_SCHEMA = cv.Schema({
     cv.Optional(CONF_AUDIO_OUTPUT_PERCENT, default=50): cv.All(
         cv.int_, cv.Range(min=0, max=100)
     ),
+    cv.Optional(CONF_PICO_UART_INPUT, default=False): cv.boolean,
+    cv.Optional(CONF_PICO_UART_NUM, default=1): cv.int_range(min=0, max=2),
+    cv.Optional(CONF_PICO_UART_TX_PIN, default=17): cv.int_,
+    cv.Optional(CONF_PICO_UART_RX_PIN, default=16): cv.int_,
+    cv.Optional(CONF_PICO_UART_BAUD_RATE, default=115200): cv.positive_int,
 }).extend(cv.COMPONENT_SCHEMA)
 
 async def to_code(config):
@@ -42,6 +52,11 @@ async def to_code(config):
     cg.add(var.set_wifi_sync_min_interval_s(config[CONF_WIFI_SYNC_MIN_INTERVAL_S]))
     cg.add(var.set_wifi_ha_sync(config[CONF_WIFI_HA_SYNC]))
     cg.add(var.set_audio_output_percent(config[CONF_AUDIO_OUTPUT_PERCENT]))
+    cg.add(var.set_pico_uart_input(config[CONF_PICO_UART_INPUT]))
+    cg.add(var.set_pico_uart_num(config[CONF_PICO_UART_NUM]))
+    cg.add(var.set_pico_uart_tx_pin(config[CONF_PICO_UART_TX_PIN]))
+    cg.add(var.set_pico_uart_rx_pin(config[CONF_PICO_UART_RX_PIN]))
+    cg.add(var.set_pico_uart_baud_rate(config[CONF_PICO_UART_BAUD_RATE]))
     if CONF_TIME_ID in config:
         t = await cg.get_variable(config[CONF_TIME_ID])
         cg.add(var.set_time_id(t))

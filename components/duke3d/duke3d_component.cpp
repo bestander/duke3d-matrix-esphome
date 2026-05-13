@@ -145,6 +145,10 @@ void Duke3DComponent::setup() {
 
     g_duke3d_component = this;
     input_init();
+    if (pico_uart_input_) {
+        input_start_pico_uart_bridge((int)pico_uart_num_, pico_uart_tx_pin_, pico_uart_rx_pin_,
+                                     (int)pico_uart_baud_rate_);
+    }
 
 #ifdef DUKE3D_FLASH_TILES
     // Must mmap from here (main task = internal-RAM stack).

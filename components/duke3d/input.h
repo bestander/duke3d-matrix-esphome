@@ -38,7 +38,10 @@ void input_push_from_isr(InputEvent evt);
 InputEvent input_pop();
 
 // Held-button state for movement/turning actions.
-// BLE/gamepad input stack is disabled, so this currently returns all-false state.
-static inline GamepadState input_get_state() {
-    return GamepadState{};
-}
+GamepadState input_get_state();
+
+// Update held-button state from an external input bridge.
+void input_set_state(const GamepadState &state);
+
+// Start Pico UART keyboard bridge task.
+void input_start_pico_uart_bridge(int uart_num, int tx_pin, int rx_pin, int baud_rate);

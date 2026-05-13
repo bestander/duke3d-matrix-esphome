@@ -85,7 +85,7 @@ hud:
 duke3d:
   id: game_engine
   # I2S output scale: 0 = mute, 100 = full mixer level (default 50 ≈ previous half-volume trim).
-  audio_output_percent: 10
+  audio_output_percent: 1
   # Wait for HA time sync before stopping WiFi at boot; otherwise clock stays 00:00 and sensors may not arrive.
   time_id: ha_time
   smoke_test: false
@@ -101,11 +101,18 @@ duke3d:
   wifi_ha_sync: false
   # Min seconds between HA WiFi syncs triggered by non-demo level loads (debounce).
   wifi_sync_min_interval_s: 90
+  # Optional: Pico USB HID host -> UART bridge (newline protocol: SC,<hex_scancode>,<0|1>).
+  pico_uart_input: false
+  pico_uart_num: 1
+  pico_uart_tx_pin: 17
+  pico_uart_rx_pin: 16
+  pico_uart_baud_rate: 115200
 
 # Matrix Portal S3 GPIO strip: A1=GPIO3, A2=GPIO9, A3=GPIO10, A4=GPIO11, TX=GPIO18, RX=GPIO8
 # JST 3-pin connector: A0=GPIO12
 # SD card (SPI) uses A1-A3 + JST A0 for CS.
 # I2S amp uses A4 + RX + TX. TX/RX are safe to repurpose — logging uses USB JTAG, not UART.
+# If you enable pico_uart_input on MatrixPortal, choose pins that are not shared with i2s_audio.
 i2s_audio:
   id: amp
   bclk_pin:  12   # A0 (JST connector)

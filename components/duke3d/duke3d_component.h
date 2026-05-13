@@ -29,6 +29,12 @@ public:
     void set_audio_output_percent(uint8_t v) { audio_output_percent_ = v > 100 ? 100 : v; }
     /// If set, bootstrap keeps WiFi up until `now().is_valid()` (HA time synced), not just grace_s.
     void set_time_id(time::RealTimeClock *t) { time_id_ = t; }
+    /// Enable UART bridge for Pico USB HID host adapter.
+    void set_pico_uart_input(bool v) { pico_uart_input_ = v; }
+    void set_pico_uart_num(uint8_t v) { pico_uart_num_ = v; }
+    void set_pico_uart_tx_pin(int v) { pico_uart_tx_pin_ = v; }
+    void set_pico_uart_rx_pin(int v) { pico_uart_rx_pin_ = v; }
+    void set_pico_uart_baud_rate(uint32_t v) { pico_uart_baud_rate_ = v; }
     /// Engine hook: queue cooperative HA / WiFi sync (debounced).
     void queue_ha_sync_if_eligible(uint8_t g_mode);
 
@@ -46,6 +52,11 @@ private:
     bool wifi_ha_sync_ = true;
     uint8_t audio_output_percent_ = 50;
     time::RealTimeClock *time_id_{nullptr};
+    bool pico_uart_input_ = false;
+    uint8_t pico_uart_num_ = 1;
+    int pico_uart_tx_pin_ = 17;
+    int pico_uart_rx_pin_ = 16;
+    uint32_t pico_uart_baud_rate_ = 115200;
     bool bootstrap_released_ = false;
     int64_t first_wifi_connected_at_us_ = 0;
     WifiWindowState wifi_state_ = WifiWindowState::STOPPED;
