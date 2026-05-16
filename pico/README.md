@@ -53,9 +53,11 @@ Typical flow (macOS/Linux):
 
 Bridge traffic (`SC,...`, `CMD,...`, `PONG`) uses **UART0** on **GP0 TX / GP1 RX** at **115200 8N1**.
 
-By default **`PICO_BRIDGE_DEBUG=1`**: prints **`[hid] gp_bits=… ax=…`** plus raw bytes **only when decoded inputs change** (same poll rate would saturate **115200** and UART would drop **`SC,…`** lines — presses look “dead”). Boot prints **`[bridge] usb_hid_uart_bridge ready`**. The ESP UART parser **ignores** any line whose first character is `[`, so protocol frames stay clean.
+By default **`PICO_BRIDGE_DEBUG=0`**: no **`[hid]`** UART dumps (keeps **`SC,…`** bandwidth free). Set **`-DPICO_BRIDGE_DEBUG=1`** in CMake when tuning a pad; dumps print **`[hid] gp_bits=…`** plus raw bytes **only when decoded inputs change**. Boot line **`[bridge] usb_hid_uart_bridge ready`** still emits when debug is on. The ESP UART parser **ignores** any line whose first character is `[`, so protocol frames stay clean.
 
-To silence Pico-side dumps (production / less UART traffic), rebuild with `-DPICO_BRIDGE_DEBUG=0` in CMake (or set `PICO_BRIDGE_DEBUG` to `0` in `CMakeLists.txt`). Stdio remains disabled on UART/USB; dumps use `uart_write_blocking` only.
+On the ESP, **`[hid]`** lines are accepted but **not** logged (`input.cpp`) so **`pico_uart`** stays readable.
+
+Stdio remains disabled on UART/USB; debug dumps use `uart_write_blocking` only.
 
 USB serial (CDC) stays **off** (USB is used as HID host for the gamepad).
 

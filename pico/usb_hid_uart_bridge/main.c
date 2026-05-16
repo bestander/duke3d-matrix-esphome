@@ -14,7 +14,7 @@
 #include <string.h>
 
 #ifndef PICO_BRIDGE_DEBUG
-#define PICO_BRIDGE_DEBUG 1
+#define PICO_BRIDGE_DEBUG 0
 #endif
 
 // UART settings for ESP32 bridge.

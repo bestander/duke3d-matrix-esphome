@@ -38,7 +38,7 @@ endif()
 pico_enable_stdio_usb(usb_hid_uart_bridge 0)
 pico_enable_stdio_uart(usb_hid_uart_bridge 0)
 if(NOT DEFINED PICO_BRIDGE_DEBUG)
-  set(PICO_BRIDGE_DEBUG 1)
+  set(PICO_BRIDGE_DEBUG 0)
 endif()
 target_compile_definitions(usb_hid_uart_bridge PRIVATE
   PICO_BRIDGE_DEBUG=${PICO_BRIDGE_DEBUG}

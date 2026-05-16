@@ -140,9 +140,11 @@ void pico_uart_task(void *arg) {
                     uart_write_bytes(port, pong, strlen(pong));
                     ESP_LOGD(TAG_PICO, "PING → PONG");
                 } else if (line_buf[0] == '[') {
-                    // Pico bridge debug ([hid] hex, [bridge] boot). Use INFO: firmware sdkconfig defaults omit ESP_LOGD at compile time.
                     s_pico_lines_bracket_interval.fetch_add(1, std::memory_order_relaxed);
-                    ESP_LOGI(TAG_PICO, "%s", line_buf);
+                    /* Pico "[hid] …" is noisy once UART decode is verified; keep "[bridge]" etc. visible. */
+                    if (strncmp(line_buf, "[hid]", 5) != 0) {
+                        ESP_LOGI(TAG_PICO, "%s", line_buf);
+                    }
                 } else {
                     s_pico_unknown_lines_interval.fetch_add(1, std::memory_order_relaxed);
                     ESP_LOGW(TAG_PICO, "unknown line: %s", line_buf);

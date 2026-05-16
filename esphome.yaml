@@ -179,7 +179,7 @@ logger:
     wifi_esp32: WARN
     # Silence periodic "[text_sensor]: Sending state …" DEBUG (e.g. Hub75 Init Status template).
     text_sensor: WARN
-    # Pico UART: INFO = button labels, CMD, and Pico "[hid]"/"[bridge]" raw lines (ESP-IDF build omits DEBUG logs by default).
+    # Pico UART: INFO = button labels + CMD + non-[hid] Pico debug lines ([hid] suppressed in input.cpp).
     pico_uart: INFO
 
 time:
