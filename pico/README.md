@@ -51,18 +51,38 @@ Typical flow (macOS/Linux):
 
 ## Runtime logging
 
-The firmware emits UART logs (same UART as `SC,...` frames), including:
+Bridge traffic (`SC,...`, `CMD,...`, `PONG`) uses **UART0** on **GP0 TX / GP1 RX** at **115200 8N1**.
 
-- `[usb] mount ...` / `[usb] umount ...`
-- `[hid] mount ...` and raw HID report bytes
-- `[bridge] hb ...` heartbeat and host status
+By default **`PICO_BRIDGE_DEBUG=1`**: prints **`[hid] gp_bits=… ax=…`** plus raw bytes **only when decoded inputs change** (same poll rate would saturate **115200** and UART would drop **`SC,…`** lines — presses look “dead”). Boot prints **`[bridge] usb_hid_uart_bridge ready`**. The ESP UART parser **ignores** any line whose first character is `[`, so protocol frames stay clean.
 
-This is useful when tuning controller mappings.
+To silence Pico-side dumps (production / less UART traffic), rebuild with `-DPICO_BRIDGE_DEBUG=0` in CMake (or set `PICO_BRIDGE_DEBUG` to `0` in `CMakeLists.txt`). Stdio remains disabled on UART/USB; dumps use `uart_write_blocking` only.
+
+USB serial (CDC) stays **off** (USB is used as HID host for the gamepad).
+
+## Gamepad calibration (YAML)
+
+In `esphome.yaml`, `duke3d.pico_gamepad_map` lists each physical control with:
+
+- **`report:`** — optional sample `01 …` hex (documentation only; Pico decode is fixed for this pad layout).
+- **`action:`** — Duke binding token (`arrow_up`, `shoot`, `jump`, `escape`, `none`, …). See `components/duke3d/__init__.py` (`DUKE_SCAN_BY_ACTION`).
+
+Every **`esphome compile`** / **`esphome run`** regenerates **`components/duke3d/pico_gamepad_generated.h`**. Rebuild the Pico UF2 afterwards so firmware matches YAML.
+
+Allowed `action:` values: `none`, `arrow_up`, `arrow_down`, `arrow_left`, `arrow_right`, `strafe_mod`, `open`, `jump`, `crouch`, `shoot`, `next_weapon`, `inventory`, `inventory_next`, `escape`.
 
 ## Notes
 
-- Current mapping supports:
-  - USB keyboard HID (boot keyboard reports)
-  - USB gamepad HID for report format observed as `len=8` with report ID `0x01`
-- Gamepad mapping is intentionally simple first-pass (D-pad/left-stick/buttons
-  to Duke movement/fire/use/map/menu). Keep raw HID logs on to tune per-controller.
+- USB keyboard HID still maps WASD/arrows/Ctrl/Space/Tab/Escape as before.
+  Some Adafruit boards expose the **same** 8-byte gamepad payload on an HID interface TinyUSB reports as Boot Keyboard; the bridge detects MatrixPortal-shaped payloads (`report_id==1`, byte `[2]` not zero — unlike HID boot keyboards where `[2]` is reserved `0`) and runs them through the gamepad decoder only. Without that, nibbles were misread as HID keys (**phantom “arrow right” when pressing B**).
+- USB gamepad (`report_id==1`, 8 bytes), MatrixPortal calibration:
+  - Cross digital on bytes `[3]`/`[4]` → arrows Up/Down/Left/Right (move / turn).
+  - LB byte6 bit2 → Duke **Strafe** (Left Alt default).
+  - RB byte6 bit3 → **Open** (Space).
+  - Z byte6 bit0 → **Jump** (Duke default **A** key / `sc_A`).
+  - C byte6 bit1 → **Crouch** (Duke default **Z** key / `sc_Z`).
+  - A `(byte[5]^0x0F)==0x40` → **Fire** (Ctrl).
+  - B `(byte[5]^0x0F)==0x20` → **Next weapon** (`'` default).
+  - X `(byte[5]^0x0F)==0x80` → **Inventory** (Enter default).
+  - **Y** `(byte[5]^0x0F)==0x10` → **inventory item next** (`]` default); actual key comes from YAML `action:` → `pico_gamepad_generated.h`.
+  - Start `(byte[6]&0x20)` → **Escape** by default (`action: escape`).
+  - Physical **star** / **dash** / **heart**: `action: none` — no UART keys (dash/heart are not decoded on the wire).

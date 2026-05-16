@@ -1,3 +1,5 @@
+import pathlib
+
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import time as time_comp
@@ -20,26 +22,202 @@ CONF_PICO_UART_NUM           = "pico_uart_num"
 CONF_PICO_UART_TX_PIN        = "pico_uart_tx_pin"
 CONF_PICO_UART_RX_PIN        = "pico_uart_rx_pin"
 CONF_PICO_UART_BAUD_RATE     = "pico_uart_baud_rate"
+CONF_PICO_GAMEPAD_MAP        = "pico_gamepad_map"
+CONF_REPORT                  = "report"
+CONF_ACTION                  = "action"
 
-CONFIG_SCHEMA = cv.Schema({
-    cv.GenerateID(): cv.declare_id(Duke3DClass),
-    cv.Optional(CONF_SMOKE_TEST,               default=False): cv.boolean,
-    cv.Optional(CONF_TILE_CACHE,               default=True):  cv.boolean,
-    cv.Optional(CONF_FLASH_TILES,              default=False): cv.boolean,
-    cv.Optional(CONF_PAUSE_WIFI,               default=False): cv.boolean,
-    cv.Optional(CONF_WIFI_BOOTSTRAP_GRACE_S,   default=12):   cv.positive_int,
-    cv.Optional(CONF_WIFI_SYNC_MIN_INTERVAL_S, default=90):   cv.positive_int,
-    cv.Optional(CONF_WIFI_HA_SYNC, default=True): cv.boolean,
-    cv.Optional(CONF_TIME_ID): cv.use_id(time_comp.RealTimeClock),
-    cv.Optional(CONF_AUDIO_OUTPUT_PERCENT, default=50): cv.All(
-        cv.int_, cv.Range(min=0, max=100)
+# Logical gamepad controls (matches Pico decode bits in main.c).
+PICO_GAMEPAD_MAP_KEYS = (
+    "cross_up",
+    "cross_down",
+    "cross_left",
+    "cross_right",
+    "a",
+    "b",
+    "c",
+    "x",
+    "y",
+    "z",
+    "start",
+    "bumper_l",
+    "bumper_r",
+    "star",
+    "dash",
+    "heart",
+)
+
+# Duke scancodes (keyboard.h) for each YAML `action:` token.
+DUKE_SCAN_BY_ACTION = {
+    "none": 0x00,
+    "arrow_up": 0x5A,
+    "arrow_down": 0x6A,
+    "arrow_left": 0x6B,
+    "arrow_right": 0x6C,
+    "strafe_mod": 0x38,   # Left Alt (Duke Strafe default)
+    "open": 0x39,         # Space
+    "jump": 0x1E,         # A (Duke Jump default)
+    "crouch": 0x2C,       # Z (Duke Crouch default)
+    "shoot": 0x1D,        # Left Ctrl
+    "next_weapon": 0x28,  # '
+    "inventory": 0x1C,    # Enter
+    "inventory_next": 0x1B,  # ]
+    "escape": 0x01,
+    # Start-only: Pico emits UART line CMD,RANDOM_DEMO instead of a scancode (see random_demo_reload).
+    "random_demo": None,
+}
+
+DUKE_GAMEPAD_ACTIONS_LIST = tuple(DUKE_SCAN_BY_ACTION.keys())
+
+# Default gameplay mapping (used when an entry omits `action:`).
+DEFAULT_GAMEPAD_ACTIONS = {
+    "cross_up": "arrow_up",
+    "cross_down": "arrow_down",
+    "cross_left": "arrow_left",
+    "cross_right": "arrow_right",
+    "a": "shoot",
+    "b": "next_weapon",
+    "c": "crouch",
+    "x": "inventory",
+    "y": "inventory_next",
+    "z": "jump",
+    "start": "escape",
+    "bumper_l": "strafe_mod",
+    "bumper_r": "open",
+    "star": "none",
+    "dash": "none",
+    "heart": "none",
+}
+
+GAMEPAD_BTN_ENTRY_SCHEMA = cv.Any(
+    cv.Schema(
+        {
+            cv.Optional(CONF_REPORT, default=""): cv.string,
+            cv.Optional(CONF_ACTION): cv.one_of(*DUKE_GAMEPAD_ACTIONS_LIST),
+        }
     ),
-    cv.Optional(CONF_PICO_UART_INPUT, default=False): cv.boolean,
-    cv.Optional(CONF_PICO_UART_NUM, default=1): cv.int_range(min=0, max=2),
-    cv.Optional(CONF_PICO_UART_TX_PIN, default=17): cv.int_,
-    cv.Optional(CONF_PICO_UART_RX_PIN, default=16): cv.int_,
-    cv.Optional(CONF_PICO_UART_BAUD_RATE, default=115200): cv.positive_int,
-}).extend(cv.COMPONENT_SCHEMA)
+    cv.string,
+)
+
+
+def _normalize_gamepad_map(value):
+    """Ensure every logical button exists with report + resolved action."""
+    value = value or {}
+    out = {}
+    for key in PICO_GAMEPAD_MAP_KEYS:
+        entry = value.get(key)
+        if entry is None:
+            report = ""
+            action = DEFAULT_GAMEPAD_ACTIONS[key]
+        elif isinstance(entry, str):
+            report = entry.strip()
+            action = DEFAULT_GAMEPAD_ACTIONS[key]
+        else:
+            report = (entry.get(CONF_REPORT) or "").strip()
+            action = entry.get(CONF_ACTION)
+            if action is None:
+                action = DEFAULT_GAMEPAD_ACTIONS[key]
+        if action not in DUKE_SCAN_BY_ACTION:
+            raise cv.Invalid(f"pico_gamepad_map.{key}: invalid action '{action}'")
+        out[key] = {CONF_REPORT: report, CONF_ACTION: action}
+    for key in PICO_GAMEPAD_MAP_KEYS:
+        if out[key][CONF_ACTION] == "random_demo" and key != "start":
+            raise cv.Invalid("action 'random_demo' is only valid for pico_gamepad_map.start")
+    return out
+
+
+PICO_GAMEPAD_MAP_SCHEMA = cv.All(
+    cv.Schema({cv.Optional(key): GAMEPAD_BTN_ENTRY_SCHEMA for key in PICO_GAMEPAD_MAP_KEYS}),
+    _normalize_gamepad_map,
+)
+
+PICO_GAMEPAD_GENERATED_H = pathlib.Path(__file__).resolve().parent / "pico_gamepad_generated.h"
+PICO_UART_GAMEPAD_LABELS_H = pathlib.Path(__file__).resolve().parent / "pico_uart_gamepad_labels.h"
+
+
+def _write_pico_uart_gamepad_labels_header(normalized_map):
+    """Maps Duke keyboard scancode → YAML `pico_gamepad_map` key(s) for ESP logging."""
+    sc_to_keys = {}
+    for key in PICO_GAMEPAD_MAP_KEYS:
+        action = normalized_map[key][CONF_ACTION]
+        if action == "random_demo":
+            continue
+        sc = DUKE_SCAN_BY_ACTION[action]
+        if sc == 0 or sc is None:
+            continue
+        sc_to_keys.setdefault(sc, []).append(key)
+
+    lines = [
+        "/* Auto-generated by ESPHome components/duke3d — do not edit by hand.",
+        " * Source: esphome.yaml → duke3d.pico_gamepad_map (`action:` tokens).",
+        " * Used by input.cpp to log which logical button fired (matched SC,... lines).",
+        " */",
+        "#pragma once",
+        "",
+        "#include <stdint.h>",
+        "",
+        "static inline const char *pico_uart_gamepad_label_for_scancode(unsigned scancode) {",
+        "    switch (scancode) {",
+    ]
+    for sc in sorted(sc_to_keys.keys()):
+        label = "|".join(sc_to_keys[sc])
+        lines.append(f'        case {sc}u: return "{label}";')
+    lines.extend(
+        [
+            "        default:",
+            "            return NULL;",
+            "    }",
+            "}",
+            "",
+        ]
+    )
+    PICO_UART_GAMEPAD_LABELS_H.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _write_pico_gamepad_header(normalized_map):
+    lines = [
+        "/* Auto-generated by ESPHome components/duke3d — do not edit by hand.",
+        " * Source: esphome.yaml → duke3d.pico_gamepad_map (`action:` tokens).",
+        " * Regenerate: esphome compile … or esphome run …",
+        " */",
+        "#pragma once",
+        "",
+    ]
+    has_random_demo_start = normalized_map["start"][CONF_ACTION] == "random_demo"
+    for key in PICO_GAMEPAD_MAP_KEYS:
+        action = normalized_map[key][CONF_ACTION]
+        macro = "PICO_GP_ACT_" + key.upper()
+        if action == "random_demo":
+            lines.append("#define PICO_GP_ACT_START (0u)")
+            continue
+        sc = DUKE_SCAN_BY_ACTION[action]
+        lines.append(f"#define {macro} ({sc}u)")
+    lines.append("")
+    lines.append(f"#define PICO_START_SENDS_RANDOM_DEMO_CMD ({1 if has_random_demo_start else 0}u)")
+    lines.append("")
+    PICO_GAMEPAD_GENERATED_H.write_text("\n".join(lines), encoding="utf-8")
+
+
+CONFIG_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(): cv.declare_id(Duke3DClass),
+        cv.Optional(CONF_SMOKE_TEST, default=False): cv.boolean,
+        cv.Optional(CONF_TILE_CACHE, default=True): cv.boolean,
+        cv.Optional(CONF_FLASH_TILES, default=False): cv.boolean,
+        cv.Optional(CONF_PAUSE_WIFI, default=False): cv.boolean,
+        cv.Optional(CONF_WIFI_BOOTSTRAP_GRACE_S, default=12): cv.positive_int,
+        cv.Optional(CONF_WIFI_SYNC_MIN_INTERVAL_S, default=90): cv.positive_int,
+        cv.Optional(CONF_WIFI_HA_SYNC, default=True): cv.boolean,
+        cv.Optional(CONF_TIME_ID): cv.use_id(time_comp.RealTimeClock),
+        cv.Optional(CONF_AUDIO_OUTPUT_PERCENT, default=50): cv.All(cv.int_, cv.Range(min=0, max=100)),
+        cv.Optional(CONF_PICO_UART_INPUT, default=False): cv.boolean,
+        cv.Optional(CONF_PICO_UART_NUM, default=1): cv.int_range(min=0, max=2),
+        cv.Optional(CONF_PICO_UART_TX_PIN, default=17): cv.int_,
+        cv.Optional(CONF_PICO_UART_RX_PIN, default=16): cv.int_,
+        cv.Optional(CONF_PICO_UART_BAUD_RATE, default=115200): cv.positive_int,
+        cv.Optional(CONF_PICO_GAMEPAD_MAP): PICO_GAMEPAD_MAP_SCHEMA,
+    }
+).extend(cv.COMPONENT_SCHEMA)
+
 
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
@@ -60,4 +238,11 @@ async def to_code(config):
     if CONF_TIME_ID in config:
         t = await cg.get_variable(config[CONF_TIME_ID])
         cg.add(var.set_time_id(t))
+
+    normalized = config.get(CONF_PICO_GAMEPAD_MAP)
+    if normalized is None:
+        normalized = _normalize_gamepad_map({})
+    _write_pico_gamepad_header(normalized)
+    _write_pico_uart_gamepad_labels_header(normalized)
+
     await cg.register_component(var, config)

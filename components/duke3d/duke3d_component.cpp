@@ -17,6 +17,7 @@
 #include "esp32_hal.h"
 #include "tilecache.h"
 #include "flash_tiles.h"
+#include "duke_reload.h"
 #include "input.h"
 #include <cstring>
 #include <dirent.h>
@@ -266,15 +267,6 @@ void Duke3DComponent::game_task(void* arg) {
 
     char game_dir[48];
     snprintf(game_dir, sizeof(game_dir), "%s/duke3d", sd_card::SdCard::MOUNT_POINT);
-    if (!pick_random_demo_dmo(game_dir, self->current_demo_, sizeof(self->current_demo_))) {
-        strncpy(self->current_demo_, "DEMO1.DMO", sizeof(self->current_demo_) - 1);
-        self->current_demo_[sizeof(self->current_demo_) - 1] = '\0';
-        ESP_LOGW(TAG, "falling back to %s", self->current_demo_);
-    }
-    ESP_LOGI(TAG, "Random demo (from disk): %s", self->current_demo_);
-
-    char demo_arg[40];
-    snprintf(demo_arg, sizeof(demo_arg), "/d%s", self->current_demo_);
 
     ESP_LOGI(TAG, "Starting Duke3D engine (game_dir=/sdcard/duke3d)");
 
@@ -282,38 +274,61 @@ void Duke3DComponent::game_task(void* arg) {
         printf("[duke3d] calling tilecache_build_if_needed\n");
         bool tc_built = tilecache_build_if_needed("/sdcard/duke3d/DUKE3D.GRP",
                                                   "/sdcard/duke3d/TCACHE.BIN");
-        printf("[duke3d] tilecache_build_if_needed returned %d\n", (int)tc_built);
-        bool tc_open = tilecache_open("/sdcard/duke3d/TCACHE.BIN");
-        printf("[duke3d] tilecache_open returned %d\n", (int)tc_open);
+        printf("[duke3d] tilecache_build_if_needed returned %d\n", (int) tc_built);
     } else {
         printf("[duke3d] tile_cache disabled — loading tiles directly from GRP\n");
     }
 
     if (global_hud) global_hud->set_game_running(true);
 
-    char* argv[] = {
-        (char*)"duke3d",
-        (char*)"-game_dir", (char*)"/sdcard/duke3d",
-        (char*)"/nm",       // music disabled (OPL2 not ported)
-        demo_arg,
-        nullptr
-    };
-    // Splash hold must start here, not in Hub75::setup — pause_wifi bootstrap can delay the engine
-    // by 10+ s, so a timer begun at panel init expires before the first blit (splash erased to black).
-    {
-        auto* m = esphome::hub75_matrix::global_hub75;
-        if (m) {
-            esphome::hub75_matrix::hub75_arm_boot_splash_hold(5000);
-            if (global_hud) global_hud->render(*m);
-            m->swap_buffers();
+    for (;;) {
+        if (!pick_random_demo_dmo(game_dir, self->current_demo_, sizeof(self->current_demo_))) {
+            strncpy(self->current_demo_, "DEMO1.DMO", sizeof(self->current_demo_) - 1);
+            self->current_demo_[sizeof(self->current_demo_) - 1] = '\0';
+            ESP_LOGW(TAG, "falling back to %s", self->current_demo_);
         }
+        ESP_LOGI(TAG, "Random demo (from disk): %s", self->current_demo_);
+
+        char demo_arg[40];
+        snprintf(demo_arg, sizeof(demo_arg), "/d%s", self->current_demo_);
+
+        if (self->tile_cache_) {
+            bool tc_open = tilecache_open("/sdcard/duke3d/TCACHE.BIN");
+            printf("[duke3d] tilecache_open returned %d\n", (int) tc_open);
+        }
+
+        char* argv[] = {
+            (char*)"duke3d",
+            (char*)"-game_dir", (char*)"/sdcard/duke3d",
+            (char*)"/nm",       // music disabled (OPL2 not ported)
+            demo_arg,
+            nullptr
+        };
+        // Splash hold must start here, not in Hub75::setup — pause_wifi bootstrap can delay the engine
+        // by 10+ s, so a timer begun at panel init expires before the first blit (splash erased to black).
+        {
+            auto* m = esphome::hub75_matrix::global_hub75;
+            if (m) {
+                esphome::hub75_matrix::hub75_arm_boot_splash_hold(5000);
+                if (global_hud) global_hud->render(*m);
+                m->swap_buffers();
+            }
+        }
+
+        const int rc = duke3d_main(5, argv);
+
+        tilecache_close();
+
+        if (rc != DUKE_EXIT_RELOAD_RANDOM_DEMO) {
+            break;
+        }
+        ESP_LOGI(TAG, "Reload macro — launching another random demo");
     }
-    duke3d_main(5, argv);
+
     if (self->pause_wifi_) {
         printf("[duke3d] game exited — restarting WiFi\n");
         duke3d_wifi_radio_on();
     }
-    tilecache_close();
     ESP_LOGI(TAG, "Duke3D engine exited");
     vTaskDelete(nullptr);
 }

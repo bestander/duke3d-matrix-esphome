@@ -45,3 +45,6 @@ void input_set_state(const GamepadState &state);
 
 // Start Pico UART keyboard bridge task.
 void input_start_pico_uart_bridge(int uart_num, int tx_pin, int rx_pin, int baud_rate);
+
+// UART macro CMD,RANDOM_DEMO (from Pico when Start uses action random_demo): reload another random .dmo.
+bool input_take_random_demo_reload_request(void);

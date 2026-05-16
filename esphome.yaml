@@ -101,12 +101,36 @@ duke3d:
   wifi_ha_sync: false
   # Min seconds between HA WiFi syncs triggered by non-demo level loads (debounce).
   wifi_sync_min_interval_s: 90
-  # Optional: Pico USB HID host -> UART bridge (newline protocol: SC,<hex_scancode>,<0|1>).
-  pico_uart_input: false
+  # Optional: Pico USB HID host -> UART bridge (SC,<hex>,<0|1>, CMD,RANDOM_DEMO, PING/PONG).
+  pico_uart_input: true
   pico_uart_num: 1
   pico_uart_tx_pin: 17
   pico_uart_rx_pin: 16
   pico_uart_baud_rate: 115200
+  # Pico gamepad: optional `report:` = sample 8-byte HID (reference). `action:` = Duke binding
+  # (see components/duke3d/__init__.py DUKE_SCAN_BY_ACTION). Run `esphome compile` to regenerate
+  # components/duke3d/pico_gamepad_generated.h before building the Pico UF2.
+  # Decode in firmware (main.c): hat uses YAML axis pair before byte [5] (skip leading report ID 01 when present).
+  # Hat is decoded only when ABXY row is idle (b5 ^ 0x0F == 0) so face presses never emit bogus cross_*.
+  # Face byte [5]^0x0F; Z/C/LB/RB/start byte [6]. Star/dash/heart: action `none` — dash/heart are not decoded as inputs.
+  pico_gamepad_map:
+    cross_up: { report: "01 7F 7F 7F 00 0F 00 00", action: arrow_up }
+    cross_down: { report: "01 7F 7F 7F FF 0F 00 00", action: arrow_down }
+    cross_left: { report: "01 7F 7F 00 7F 0F 00 00", action: arrow_left }
+    cross_right: { report: "01 7F 7F FF 7F 0F 00 00", action: arrow_right }
+    a: { report: "01 7F 7F 7F 7F 4F 00 00", action: shoot }
+    b: { report: "01 7F 7F 7F 7F 2F 00 00", action: next_weapon }
+    c: { report: "01 7F 7F 7F 7F 0F 02 00", action: crouch }
+    x: { report: "01 7F 7F 7F 7F 8F 00 00", action: inventory }
+    y: { report: "01 7F 7F 7F 7F 1F 00 00", action: inventory_next }
+    z: { report: "01 7F 7F 7F 7F 0F 01 00", action: jump }
+    # Start → CMD,RANDOM_DEMO over UART (no Escape): cooperative reload picks another random .dmo.
+    start: { report: "01 7F 7F 7F 7F 0F 20 00", action: random_demo }
+    bumper_l: { report: "01 7F 7F 7F 7F 0F 04 00", action: strafe_mod }
+    bumper_r: { report: "01 7F 7F 7F 7F 0F 08 00", action: open }
+    star: { report: "01 7F 7F 7F 7F 0F 00 00", action: none }
+    dash: { report: "01 7F 7F 7F 7F 0F 10 00", action: none }
+    heart: { report: "01 7F 7F 7F 7F 0F 10 00", action: none }
 
 # Matrix Portal S3 GPIO strip: A1=GPIO3, A2=GPIO9, A3=GPIO10, A4=GPIO11, TX=GPIO18, RX=GPIO8
 # JST 3-pin connector: A0=GPIO12
@@ -153,6 +177,10 @@ logger:
     S3: DEBUG
     wifi: WARN
     wifi_esp32: WARN
+    # Silence periodic "[text_sensor]: Sending state …" DEBUG (e.g. Hub75 Init Status template).
+    text_sensor: WARN
+    # Pico UART: INFO = button labels, CMD, and Pico "[hid]"/"[bridge]" raw lines (ESP-IDF build omits DEBUG logs by default).
+    pico_uart: INFO
 
 time:
   - platform: homeassistant

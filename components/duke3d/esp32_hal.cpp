@@ -5,6 +5,8 @@
 #include "esphome/components/sd_card/sd_card.h"
 #include "esphome/components/i2s_audio/i2s_audio.h"
 #include "mv_stream.h"
+#include "duke_reload.h"
+#include "input.h"
 #include "esp_heap_caps.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
@@ -49,6 +51,10 @@ void spi_lcd_clear() {}  // no-op: clearing is done implicitly by swap_buffers
 void spi_lcd_send_boarder(uint16_t *scr, int /*border*/) {
     auto *m = esphome::hub75_matrix::global_hub75;
     if (!m) return;
+
+    if (input_take_random_demo_reload_request()) {
+        duke_jump_out_for_demo_reload();
+    }
 
     static int frame_count = 0;
     static int64_t last_frame_us = 0;

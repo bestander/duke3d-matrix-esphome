@@ -176,9 +176,8 @@ buffer, freeing enough heap for all 32 palookup tables (~263 KB) to live in PSRA
 | Checkpoint | Free |
 |---|---|
 | After hub75 / WiFi / SD init | ~393 KB |
-| After BLE (NimBLE) at `initengine` | ~323 KB |
 | After `initcache` (32 KB) | ~291 KB |
-| After 32 palookup tables (~263 KB) | ~28 KB remaining heap |
+| After 32 palookup tables (~263 KB) | ~350 KB remaining heap |
 
 | Region | Usage |
 |--------|-------|
