@@ -8,6 +8,7 @@
 
 static inline const char *pico_uart_gamepad_label_for_scancode(unsigned scancode) {
     switch (scancode) {
+        case 1u: return "start";
         case 27u: return "y";
         case 28u: return "x";
         case 29u: return "a";

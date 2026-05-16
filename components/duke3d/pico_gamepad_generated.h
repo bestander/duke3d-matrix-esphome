@@ -14,11 +14,11 @@
 #define PICO_GP_ACT_X (28u)
 #define PICO_GP_ACT_Y (27u)
 #define PICO_GP_ACT_Z (30u)
-#define PICO_GP_ACT_START (0u)
+#define PICO_GP_ACT_START (1u)
 #define PICO_GP_ACT_BUMPER_L (56u)
 #define PICO_GP_ACT_BUMPER_R (57u)
 #define PICO_GP_ACT_STAR (0u)
 #define PICO_GP_ACT_DASH (0u)
 #define PICO_GP_ACT_HEART (0u)
 
-#define PICO_START_SENDS_RANDOM_DEMO_CMD (1u)
+#define PICO_START_SENDS_RANDOM_DEMO_CMD (0u)

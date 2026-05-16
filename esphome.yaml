@@ -101,7 +101,7 @@ duke3d:
   wifi_ha_sync: false
   # Min seconds between HA WiFi syncs triggered by non-demo level loads (debounce).
   wifi_sync_min_interval_s: 90
-  # Optional: Pico USB HID host -> UART bridge (SC,<hex>,<0|1>, CMD,RANDOM_DEMO, PING/PONG).
+  # Optional: Pico USB HID host -> UART bridge (SC,<hex>,<0|1>; optional CMD,RANDOM_DEMO if start maps to random_demo; PING/PONG).
   pico_uart_input: true
   pico_uart_num: 1
   pico_uart_tx_pin: 17
@@ -124,8 +124,8 @@ duke3d:
     x: { report: "01 7F 7F 7F 7F 8F 00 00", action: inventory }
     y: { report: "01 7F 7F 7F 7F 1F 00 00", action: inventory_next }
     z: { report: "01 7F 7F 7F 7F 0F 01 00", action: jump }
-    # Start → CMD,RANDOM_DEMO over UART (no Escape): cooperative reload picks another random .dmo.
-    start: { report: "01 7F 7F 7F 7F 0F 20 00", action: random_demo }
+    # Start → Escape (menu/pause), same as default Duke binding.
+    start: { report: "01 7F 7F 7F 7F 0F 20 00", action: escape }
     bumper_l: { report: "01 7F 7F 7F 7F 0F 04 00", action: strafe_mod }
     bumper_r: { report: "01 7F 7F 7F 7F 0F 08 00", action: open }
     star: { report: "01 7F 7F 7F 7F 0F 00 00", action: none }

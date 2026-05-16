@@ -202,7 +202,8 @@ void pico_uart_status_task(void *arg) {
                          (unsigned) bytes_n, uart_num, tx_pin, rx_pin, baud, (unsigned) pending_rx, (unsigned) sc_n,
                          (unsigned) cmd_n, (unsigned) bracket_n, (unsigned) unk_n);
             } else {
-                ESP_LOGW(TAG_PICO,
+                /* Idle RX before any Pico traffic is normal; keep at DEBUG so INFO logs stay clean. */
+                ESP_LOGD(TAG_PICO,
                          "status: NO_DATA_YET | UART%d tx=%d rx=%d baud=%d | pending_rx=%u — idle RX "
                          "(Pico GP0 TX → ESP GPIO%d RX, common GND, 115200 8N1)",
                          uart_num, tx_pin, rx_pin, baud, (unsigned) pending_rx, rx_pin);
