@@ -5,8 +5,9 @@
 #include "esphome/components/sd_card/sd_card.h"
 #include "esphome/components/i2s_audio/i2s_audio.h"
 #include "mv_stream.h"
-#include "duke_reload.h"
 #include "input.h"
+#include "pico_uart_bridge_maps.h"
+#include "duke_reload.h"
 #include "esp_heap_caps.h"
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
@@ -49,12 +50,15 @@ void spi_lcd_init() {}   // no-op: we use HUB75, not SPI LCD
 void spi_lcd_clear() {}  // no-op: clearing is done implicitly by swap_buffers
 
 void spi_lcd_send_boarder(uint16_t *scr, int /*border*/) {
+#if PICO_UART_BRIDGE_DROP_HID_KEYBOARD_ESCAPE
+    /* Poll before Hub75 pointer check — avoids missing presses during splash / transient global_hub75=null. */
+    if (input_take_pico_uart_start_press()) {
+        duke_jump_out_with_reason(DUKE_EXIT_START_RECORD_SESSION);
+    }
+#endif
+
     auto *m = esphome::hub75_matrix::global_hub75;
     if (!m) return;
-
-    if (input_take_random_demo_reload_request()) {
-        duke_jump_out_for_demo_reload();
-    }
 
     static int frame_count = 0;
     static int64_t last_frame_us = 0;

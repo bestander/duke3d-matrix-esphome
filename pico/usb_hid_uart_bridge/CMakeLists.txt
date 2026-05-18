@@ -17,7 +17,6 @@ add_executable(usb_hid_uart_bridge
 
 target_include_directories(usb_hid_uart_bridge PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}
-  ${CMAKE_CURRENT_LIST_DIR}/../../components/duke3d
 )
 
 target_link_libraries(usb_hid_uart_bridge

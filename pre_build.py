@@ -32,6 +32,9 @@ engine_base = os.path.join(
 ).replace("\\", "/")
 
 MARKER = "Duke3D engine sources"
+# CMake FILE(GLOB) for app_sources runs at configure time; new top-level component .c files
+# may be missing until a clean configure. Explicitly append and de-dup so links stay correct.
+DUKE_EXTRA_SRC_MARKER = "pico_uart_vendor_hid_decode explicit link"
 
 PATCH = (
     "\n# Duke3D engine sources — referenced by absolute path since ESPHome only copies\n"
@@ -140,6 +143,23 @@ else:
             print("[duke3d pre_build] WARNING: Could not find marker to patch CMakeLists.txt")
     else:
         print("[duke3d pre_build] CMakeLists.txt already patched")
+
+    extra_src_needle = (
+        "FILE(GLOB_RECURSE app_sources ${CMAKE_SOURCE_DIR}/src/*.*)"
+    )
+    extra_src_block = (
+        "\n\n# {}\n".format(DUKE_EXTRA_SRC_MARKER)
+        + 'list(APPEND app_sources "${CMAKE_SOURCE_DIR}'
+        '/src/esphome/components/duke3d/pico_uart_vendor_hid_decode.c")\n'
+        "list(REMOVE_DUPLICATES app_sources)\n"
+    )
+    with open(cmake_path, "r") as f:
+        content2 = f.read()
+    if DUKE_EXTRA_SRC_MARKER not in content2 and extra_src_needle in content2:
+        content2 = content2.replace(extra_src_needle, extra_src_needle + extra_src_block, 1)
+        with open(cmake_path, "w") as f:
+            f.write(content2)
+        print("[duke3d pre_build] Appended explicit pico_uart_vendor_hid_decode.c to SRCS")
 
 # Patch build.ninja to remove --warn-common.  GNU ld 2.41 exits(1) when
 # --warn-common is set and -fcommon is used for the old C engine code.

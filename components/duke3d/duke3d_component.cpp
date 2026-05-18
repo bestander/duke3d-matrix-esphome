@@ -281,31 +281,58 @@ void Duke3DComponent::game_task(void* arg) {
 
     if (global_hud) global_hud->set_game_running(true);
 
-    for (;;) {
-        if (!pick_random_demo_dmo(game_dir, self->current_demo_, sizeof(self->current_demo_))) {
-            strncpy(self->current_demo_, "DEMO1.DMO", sizeof(self->current_demo_) - 1);
-            self->current_demo_[sizeof(self->current_demo_) - 1] = '\0';
-            ESP_LOGW(TAG, "falling back to %s", self->current_demo_);
-        }
-        ESP_LOGI(TAG, "Random demo (from disk): %s", self->current_demo_);
+    static char demo_arg[40];
 
-        char demo_arg[40];
-        snprintf(demo_arg, sizeof(demo_arg), "/d%s", self->current_demo_);
+    char* argv_demo[8];
+    char* argv_record[] = {
+        (char*) "duke3d",
+        (char*) "-game_dir",
+        (char*) "/sdcard/duke3d",
+        (char*) "/nm",
+        (char*) "/r",
+        (char*) "/s0",
+        (char*) "/v1",
+        (char*) "/l1",
+        (char*) "/er",
+        nullptr,
+    };
+
+    bool kiosk_record_boot = false;
+
+    for (;;) {
+        int argc_run;
+        char** argv_run;
+
+        if (kiosk_record_boot) {
+            kiosk_record_boot = false;
+            argc_run = 9;
+            argv_run = argv_record;
+            ESP_LOGI(TAG, "Kiosk: live play easy E1L1 with demo recording (/r, /er)");
+        } else {
+            if (!pick_random_demo_dmo(game_dir, self->current_demo_, sizeof(self->current_demo_))) {
+                strncpy(self->current_demo_, "DEMO1.DMO", sizeof(self->current_demo_) - 1);
+                self->current_demo_[sizeof(self->current_demo_) - 1] = '\0';
+                ESP_LOGW(TAG, "falling back to %s", self->current_demo_);
+            }
+            ESP_LOGI(TAG, "Random demo (from disk): %s", self->current_demo_);
+
+            snprintf(demo_arg, sizeof(demo_arg), "/d%s", self->current_demo_);
+
+            argc_run = 5;
+            argv_demo[0] = (char*) "duke3d";
+            argv_demo[1] = (char*) "-game_dir";
+            argv_demo[2] = (char*) "/sdcard/duke3d";
+            argv_demo[3] = (char*) "/nm";
+            argv_demo[4] = demo_arg;
+            argv_demo[5] = nullptr;
+            argv_run = argv_demo;
+        }
 
         if (self->tile_cache_) {
             bool tc_open = tilecache_open("/sdcard/duke3d/TCACHE.BIN");
             printf("[duke3d] tilecache_open returned %d\n", (int) tc_open);
         }
 
-        char* argv[] = {
-            (char*)"duke3d",
-            (char*)"-game_dir", (char*)"/sdcard/duke3d",
-            (char*)"/nm",       // music disabled (OPL2 not ported)
-            demo_arg,
-            nullptr
-        };
-        // Splash hold must start here, not in Hub75::setup — pause_wifi bootstrap can delay the engine
-        // by 10+ s, so a timer begun at panel init expires before the first blit (splash erased to black).
         {
             auto* m = esphome::hub75_matrix::global_hub75;
             if (m) {
@@ -315,14 +342,20 @@ void Duke3DComponent::game_task(void* arg) {
             }
         }
 
-        const int rc = duke3d_main(5, argv);
+        const int rc = duke3d_main(argc_run, argv_run);
 
         tilecache_close();
 
-        if (rc != DUKE_EXIT_RELOAD_RANDOM_DEMO) {
-            break;
+        if (rc == DUKE_EXIT_START_RECORD_SESSION) {
+            kiosk_record_boot = true;
+            ESP_LOGI(TAG, "Start record UART — reloading engine into kiosk recording");
+            continue;
         }
-        ESP_LOGI(TAG, "Reload macro — launching another random demo");
+        if (rc == DUKE_EXIT_RECORDING_SESSION_DONE) {
+            ESP_LOGI(TAG, "Demo recording finalized (/er) — resuming random demo playback");
+            continue;
+        }
+        break;
     }
 
     if (self->pause_wifi_) {

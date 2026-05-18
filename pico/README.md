@@ -1,90 +1,54 @@
 # Pi Pico USB HID Host Bridge
 
-This folder contains firmware for a Raspberry Pi Pico that acts as a
-USB HID host (keyboard/gamepad) and forwards Duke3D key events over UART to
-the ESP32 firmware.
+Firmware for Raspberry Pi Pico as USB HID host, forwarding **device-neutral** events over UART. **Duke3D bindings live only on the ESP** (`components/duke3d/pico_uart_bridge_maps.h`, regenerated from `esphome.yaml`).
 
 ## UART protocol
 
-The ESP32 UART bridge expects newline-delimited ASCII:
+Newline-terminated ASCII (**115200 8N1**, Pico UART0 GP0 TX / GP1 RX):
 
-- `SC,<hex_scancode>,<0|1>`
-  - `0|1 = 1` key press, `0` key release
-  - Example: `SC,0x11,1` (W down), `SC,0x11,0` (W up)
+### Gamepad (raw HID snapshot on the wire)
 
-Optional keepalive command:
+- **`GR,<len>,<hex>`** — when the gamepad HID report changes, Pico sends one line: payload length in bytes, comma, then **lowercase** hex (no spaces), e.g. `GR,8,017f7f7f7f0f0000\n`. The ESP decodes MatrixPortal-style 8-byte layout and maps edges to Duke using `duke3d.pico_gamepad_map` (logical names: `cross_up`, `cross_down`, … — see YAML).
 
-- `PING` -> Pico replies `PONG`
+### Keyboard (USB HID usage in key slot)
+
+- **`KB,<hid_hex>,<0|1>`** — key from the 6-byte boot keycode array (e.g. **`KB,0x29,1`** = Escape down). ESP maps a small fixed subset to Duke per `pico_uart_bridge_maps.h`.
+
+### Other
+
+- **`PING`** → Pico replies **`PONG\n`**
+- **`[bridge] …`**, **`[hid] …`** — optional debug (see `PICO_BRIDGE_DEBUG`). ESP may filter **`[hid]`** for log noise.
+
+Start with YAML **`action: record_session`**: after ESP decodes **`GR,...`**, a **start** press triggers kiosk reload when **`pico_uart_bridge_maps.h`** sets **`PICO_UART_BRIDGE_DROP_HID_KEYBOARD_ESCAPE`** (same rule as ESC-drop for composite pads).
 
 ## Wiring (3.3V logic)
 
-- Pico `UART0 TX` -> ESP32 `pico_uart_rx_pin`
-- Pico `UART0 RX` -> ESP32 `pico_uart_tx_pin` (optional, only needed for `PING/PONG`)
-- Pico `GND` -> ESP32 `GND`
+- Pico `UART0 TX` → ESP32 `pico_uart_rx_pin`
+- Pico `UART0 RX` → ESP32 `pico_uart_tx_pin` (optional; for `PING`/`PONG`)
+- Pico `GND` → ESP32 `GND`
 
 ## Build
 
-The sample under `usb_hid_uart_bridge` uses Pico SDK + TinyUSB host.
+Uses Pico SDK + TinyUSB host (`pico_sdk_import.cmake`). Default **`PICO_BOARD=pico_w`**; override if needed.
 
-This project uses the standard Pico CMake pattern (`pico_sdk_import.cmake`)
-like `pi-pico-usb-uart-host`.
-Default board is set to `pico_w`.
+Typical flow:
 
-Typical flow (macOS/Linux):
+1. Install Pico SDK toolchain; set **`PICO_SDK_PATH`**
+2. `cd pico/usb_hid_uart_bridge && mkdir -p build && cd build && cmake .. && cmake --build .`
+3. BOOTSEL + copy **`usb_hid_uart_bridge.uf2`**
 
-1. Install Pico SDK toolchain.
-2. Clone Pico SDK once (example path):
-   - `mkdir -p ~/pico && cd ~/pico`
-   - `git clone https://github.com/raspberrypi/pico-sdk.git`
-   - `cd pico-sdk && git submodule update --init`
-3. Set `PICO_SDK_PATH`:
-   - `export PICO_SDK_PATH=$HOME/pico/pico-sdk`
-4. Build:
-   - `cd pico/usb_hid_uart_bridge`
-   - `mkdir -p build && cd build`
-   - `cmake ..`
-   - `cmake --build .`
-   - Optional override for non-W Pico: `cmake -DPICO_BOARD=pico ..`
-5. Flash:
-   - Hold `BOOTSEL` on Pico while plugging USB.
-   - Copy `usb_hid_uart_bridge.uf2` from `build/` to `RPI-RP2`.
+Firmware is **self-contained** — no include path into `components/duke3d`.
 
 ## Runtime logging
 
-Bridge traffic (`SC,...`, `CMD,...`, `PONG`) uses **UART0** on **GP0 TX / GP1 RX** at **115200 8N1**.
+Bridge traffic uses **UART0**. With **`PICO_BRIDGE_DEBUG=1`**, verbose **`[hid]`** lines appear. On boot the Pico sends **`[bridge] v1 codecs=GR,KB+PING+PONG`** (or similar) once.
 
-By default **`PICO_BRIDGE_DEBUG=0`**: no **`[hid]`** UART dumps (keeps **`SC,…`** bandwidth free). Set **`-DPICO_BRIDGE_DEBUG=1`** in CMake when tuning a pad; dumps print **`[hid] gp_bits=…`** plus raw bytes **only when decoded inputs change**. Boot line **`[bridge] usb_hid_uart_bridge ready`** still emits when debug is on. The ESP UART parser **ignores** any line whose first character is `[`, so protocol frames stay clean.
+## YAML / ESP codegen
 
-On the ESP, **`[hid]`** lines are accepted but **not** logged (`input.cpp`) so **`pico_uart`** stays readable.
+`duke3d.pico_gamepad_map` **`action:`** tokens still define Duke bindings; **`esphome compile`** writes **`components/duke3d/pico_uart_bridge_maps.h`** (`pico_uart_gp_logical_to_duke_scancode`, HID→Duke for **`KB,...`**, **`PICO_UART_BRIDGE_DROP_HID_KEYBOARD_ESCAPE`** when **`start` → `record_session`** so composite pads cannot open the menu via HID Escape).
 
-Stdio remains disabled on UART/USB; debug dumps use `uart_write_blocking` only.
+Panel **dash / heart** share HID byte **[6] bit 0x10**; the ESP treats edges as **`star/heart`** (`ESP_LOGI` `star/heart (vendor)`, no Duke binding unless you extend maps).
 
-USB serial (CDC) stays **off** (USB is used as HID host for the gamepad).
+## MatrixPortal report layout
 
-## Gamepad calibration (YAML)
-
-In `esphome.yaml`, `duke3d.pico_gamepad_map` lists each physical control with:
-
-- **`report:`** — optional sample `01 …` hex (documentation only; Pico decode is fixed for this pad layout).
-- **`action:`** — Duke binding token (`arrow_up`, `shoot`, `jump`, `escape`, `none`, …). See `components/duke3d/__init__.py` (`DUKE_SCAN_BY_ACTION`).
-
-Every **`esphome compile`** / **`esphome run`** regenerates **`components/duke3d/pico_gamepad_generated.h`**. Rebuild the Pico UF2 afterwards so firmware matches YAML.
-
-Allowed `action:` values: `none`, `arrow_up`, `arrow_down`, `arrow_left`, `arrow_right`, `strafe_mod`, `open`, `jump`, `crouch`, `shoot`, `next_weapon`, `inventory`, `inventory_next`, `escape`.
-
-## Notes
-
-- USB keyboard HID still maps WASD/arrows/Ctrl/Space/Tab/Escape as before.
-  Some Adafruit boards expose the **same** 8-byte gamepad payload on an HID interface TinyUSB reports as Boot Keyboard; the bridge detects MatrixPortal-shaped payloads (`report_id==1`, byte `[2]` not zero — unlike HID boot keyboards where `[2]` is reserved `0`) and runs them through the gamepad decoder only. Without that, nibbles were misread as HID keys (**phantom “arrow right” when pressing B**).
-- USB gamepad (`report_id==1`, 8 bytes), MatrixPortal calibration:
-  - Cross digital on bytes `[3]`/`[4]` → arrows Up/Down/Left/Right (move / turn).
-  - LB byte6 bit2 → Duke **Strafe** (Left Alt default).
-  - RB byte6 bit3 → **Open** (Space).
-  - Z byte6 bit0 → **Jump** (Duke default **A** key / `sc_A`).
-  - C byte6 bit1 → **Crouch** (Duke default **Z** key / `sc_Z`).
-  - A `(byte[5]^0x0F)==0x40` → **Fire** (Ctrl).
-  - B `(byte[5]^0x0F)==0x20` → **Next weapon** (`'` default).
-  - X `(byte[5]^0x0F)==0x80` → **Inventory** (Enter default).
-  - **Y** `(byte[5]^0x0F)==0x10` → **inventory item next** (`]` default); actual key comes from YAML `action:` → `pico_gamepad_generated.h`.
-  - Start `(byte[6]&0x20)` → **Escape** by default (`action: escape`).
-  - Physical **star** / **dash** / **heart**: `action: none` — no UART keys (dash/heart are not decoded on the wire).
+Pico forwards **opaque** snapshots only. Fixed 8-byte **`01 | … | b5 b6`** hat and face row is decoded on the ESP (`pico_uart_vendor_hid_decode.*`). No Duke scancodes on the wire.

@@ -85,7 +85,7 @@ hud:
 duke3d:
   id: game_engine
   # I2S output scale: 0 = mute, 100 = full mixer level (default 50 ≈ previous half-volume trim).
-  audio_output_percent: 1
+  audio_output_percent: 5
   # Wait for HA time sync before stopping WiFi at boot; otherwise clock stays 00:00 and sensors may not arrive.
   time_id: ha_time
   smoke_test: false
@@ -101,7 +101,7 @@ duke3d:
   wifi_ha_sync: false
   # Min seconds between HA WiFi syncs triggered by non-demo level loads (debounce).
   wifi_sync_min_interval_s: 90
-  # Optional: Pico USB HID host -> UART bridge (SC,<hex>,<0|1>; optional CMD,RANDOM_DEMO if start maps to random_demo; PING/PONG).
+  # Optional: Pico USB HID host → UART (`GR,<len>,<hex>` snapshots, `KB,<hid>,<0|1>`, `PING`/`PONG`).
   pico_uart_input: true
   pico_uart_num: 1
   pico_uart_tx_pin: 17
@@ -109,7 +109,7 @@ duke3d:
   pico_uart_baud_rate: 115200
   # Pico gamepad: optional `report:` = sample 8-byte HID (reference). `action:` = Duke binding
   # (see components/duke3d/__init__.py DUKE_SCAN_BY_ACTION). Run `esphome compile` to regenerate
-  # components/duke3d/pico_gamepad_generated.h before building the Pico UF2.
+  # Run `esphome compile` to regenerate `components/duke3d/pico_uart_bridge_maps.h`; rebuild Pico UF2 (no shared header with ESP).
   # Decode in firmware (main.c): hat uses YAML axis pair before byte [5] (skip leading report ID 01 when present).
   # Hat is decoded only when ABXY row is idle (b5 ^ 0x0F == 0) so face presses never emit bogus cross_*.
   # Face byte [5]^0x0F; Z/C/LB/RB/start byte [6]. Star/dash/heart: action `none` — dash/heart are not decoded as inputs.
@@ -124,8 +124,8 @@ duke3d:
     x: { report: "01 7F 7F 7F 7F 8F 00 00", action: inventory }
     y: { report: "01 7F 7F 7F 7F 1F 00 00", action: inventory_next }
     z: { report: "01 7F 7F 7F 7F 0F 01 00", action: jump }
-    # Start → Escape (menu/pause), same as default Duke binding.
-    start: { report: "01 7F 7F 7F 7F 0F 20 00", action: escape }
+    # Start: ESP decodes `GR,...`; kiosk uses latch polled from render path when maps.h DROP_HID_KEYBOARD_ESCAPE=1 (record_session).
+    start: { report: "01 7F 7F 7F 7F 0F 20 00", action: record_session }
     bumper_l: { report: "01 7F 7F 7F 7F 0F 04 00", action: strafe_mod }
     bumper_r: { report: "01 7F 7F 7F 7F 0F 08 00", action: open }
     star: { report: "01 7F 7F 7F 7F 0F 00 00", action: none }
@@ -179,7 +179,7 @@ logger:
     wifi_esp32: WARN
     # Silence periodic "[text_sensor]: Sending state …" DEBUG (e.g. Hub75 Init Status template).
     text_sensor: WARN
-    # Pico UART: INFO = button labels + CMD + non-[hid] Pico debug lines ([hid] suppressed in input.cpp).
+    # Pico UART: INFO = `[bridge]` + logical button name on press (from decoded `GR,...`).
     pico_uart: INFO
 
 time:

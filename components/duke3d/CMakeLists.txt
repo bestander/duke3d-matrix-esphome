@@ -40,6 +40,7 @@ idf_component_register(
         "flash_tiles.cpp"
         "engine_main_shim.c"
         "audiolib_stubs.c"
+        "pico_uart_vendor_hid_decode.c"
         ${ENGINE_SRCS}
         ${GAME_SRCS}
         ${SDL_SRCS}
