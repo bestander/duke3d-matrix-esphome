@@ -6,6 +6,7 @@ extern "C" {
 }
 
 #include "pico_uart_bridge_maps.h"
+#include "driver/gpio.h"
 #include "driver/uart.h"
 #include "esp_log.h"
 #include "freertos/task.h"
@@ -45,6 +46,7 @@ namespace {
 static std::atomic<uint32_t> s_pico_last_rx_ms{0};
 static std::atomic<uint32_t> s_pico_lines_gr_interval{0};
 static std::atomic<uint32_t> s_pico_lines_kb_interval{0};
+static std::atomic<uint32_t> s_pico_lines_sc_interval{0};
 static std::atomic<uint32_t> s_pico_bytes_rx_interval{0};
 static std::atomic<uint32_t> s_pico_unknown_lines_interval{0};
 static std::atomic<uint32_t> s_pico_lines_bracket_interval{0};
@@ -105,6 +107,19 @@ bool parse_kb_line(const char *line, unsigned *hid_out, bool *pressed_out) {
     return true;
 }
 
+/** Legacy Pico lines (`SC,<hex>,<0|1>`) from older usb_hid_uart_bridge builds — still accepted if present. */
+static bool parse_legacy_sc_line(const char *line, int *scancode_out, bool *pressed_out) {
+    if (line == nullptr || scancode_out == nullptr || pressed_out == nullptr)
+        return false;
+    unsigned int sc = 0;
+    int pressed = 0;
+    if (sscanf(line, "SC,%x,%d", &sc, &pressed) != 2)
+        return false;
+    *scancode_out = static_cast<int>(sc);
+    *pressed_out = (pressed != 0);
+    return true;
+}
+
 void sync_held_state_from_keys() {
     GamepadState st{};
     st.forward = KB_KeyPressed(sc_W) || KB_KeyPressed(sc_UpArrow);
@@ -122,10 +137,6 @@ void sync_held_state_from_keys() {
 
 static void inject_logical_button_event(const char *name, bool pressed) {
     bool handled = false;
-    if (strcmp(name, "star") == 0 && pressed) {
-        ESP_LOGI(TAG_PICO, "star/heart (vendor)");
-        handled = true;
-    }
     if (!handled && strcmp(name, "start") == 0 && pressed) {
         pico_uart_note_start_press_uart("vendor");
         handled = true;
@@ -184,15 +195,23 @@ void pico_uart_task(void *arg) {
     uart_cfg.rx_flow_ctrl_thresh = 0;
     uart_cfg.source_clk = UART_SCLK_DEFAULT;
 
-    ESP_ERROR_CHECK(uart_driver_install(port, 1024, 0, 0, nullptr, 0));
+    /* Drop any alternate-function hold from a previous boot stage before claiming UART. */
+    gpio_reset_pin((gpio_num_t) cfg.tx_pin);
+    gpio_reset_pin((gpio_num_t) cfg.rx_pin);
+
+    /* RX/TX ring sizes: TX=0 has been flaky on some IDF builds when we occasionally uart_write_bytes (PONG). */
+    ESP_ERROR_CHECK(uart_driver_install(port, 4096, 512, 0, nullptr, 0));
     ESP_ERROR_CHECK(uart_param_config(port, &uart_cfg));
     ESP_ERROR_CHECK(uart_set_pin(port, cfg.tx_pin, cfg.rx_pin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    uart_flush_input(port);
 
-    ESP_LOGD(TAG_PICO, "bridge started port=%d esp_tx=GPIO%d esp_rx=GPIO%d baud=%d (Pico TX→ESP RX, Pico RX←ESP TX)",
-             (int) port, cfg.tx_pin, cfg.rx_pin, cfg.baud_rate);
+    ESP_LOGI(TAG_PICO,
+             "UART%d ready tx_gpio=%d rx_gpio=%d baud=%u — expect GR,/KB,/ or legacy SC,… lines from Pico (+\\n)",
+             (int) port, cfg.tx_pin, cfg.rx_pin, (unsigned) cfg.baud_rate);
 
     constexpr size_t k_gr_max_payload = 64;
-    constexpr size_t k_line_max = 8 + k_gr_max_payload * 2 + 4;
+    /* Pico debug "[hid] report_len=… | …" can be ~220 chars; oversize avoids line buffer resets mid-frame. */
+    constexpr size_t k_line_max = 320;
 
     char line_buf[k_line_max];
     size_t line_len = 0;
@@ -241,18 +260,32 @@ void pico_uart_task(void *arg) {
                             ESP_LOGD(TAG_PICO, "KB HID 0x%02X not mapped to Duke", (unsigned)hid_key);
                         }
                     }
-                } else if (strcmp(line_buf, "PING") == 0) {
-                    const char *pong = "PONG\n";
-                    uart_write_bytes(port, pong, strlen(pong));
-                    ESP_LOGD(TAG_PICO, "PING → PONG");
-                } else if (line_buf[0] == '[') {
-                    s_pico_lines_bracket_interval.fetch_add(1, std::memory_order_relaxed);
-                    if (strncmp(line_buf, "[hid]", 5) != 0) {
-                        ESP_LOGI(TAG_PICO, "%s", line_buf);
-                    }
                 } else {
-                    s_pico_unknown_lines_interval.fetch_add(1, std::memory_order_relaxed);
-                    ESP_LOGW(TAG_PICO, "unknown line: %s", line_buf);
+                    int leg_sc = -1;
+                    bool leg_pr = false;
+                    if (parse_legacy_sc_line(line_buf, &leg_sc, &leg_pr)) {
+                        s_pico_lines_sc_interval.fetch_add(1, std::memory_order_relaxed);
+                        ESP_LOGI(TAG_PICO, "evt SC 0x%X %s", static_cast<unsigned>(leg_sc),
+                                 leg_pr ? "down" : "up");
+                        if (leg_sc >= 0 && leg_sc <= sc_LastScanCode) {
+                            KB_InjectScanCode(leg_sc, leg_pr ? 1 : 0);
+                            sync_held_state_from_keys();
+                        } else if (leg_pr) {
+                            ESP_LOGW(TAG_PICO, "ignored out-of-range legacy scancode %d", leg_sc);
+                        }
+                    } else if (strcmp(line_buf, "PING") == 0) {
+                        const char *pong = "PONG\n";
+                        uart_write_bytes(port, pong, strlen(pong));
+                        ESP_LOGD(TAG_PICO, "PING → PONG");
+                    } else if (line_buf[0] == '[') {
+                        s_pico_lines_bracket_interval.fetch_add(1, std::memory_order_relaxed);
+                        if (strncmp(line_buf, "[hid]", 5) != 0) {
+                            ESP_LOGI(TAG_PICO, "%s", line_buf);
+                        }
+                    } else {
+                        s_pico_unknown_lines_interval.fetch_add(1, std::memory_order_relaxed);
+                        ESP_LOGW(TAG_PICO, "unknown line: %s", line_buf);
+                    }
                 }
             }
             line_len = 0;
@@ -295,6 +328,7 @@ void pico_uart_status_task(void *arg) {
 
         const uint32_t gr_n = s_pico_lines_gr_interval.exchange(0, std::memory_order_relaxed);
         const uint32_t kb_n = s_pico_lines_kb_interval.exchange(0, std::memory_order_relaxed);
+        const uint32_t sc_n = s_pico_lines_sc_interval.exchange(0, std::memory_order_relaxed);
         const uint32_t bytes_n = s_pico_bytes_rx_interval.exchange(0, std::memory_order_relaxed);
         const uint32_t unk_n = s_pico_unknown_lines_interval.exchange(0, std::memory_order_relaxed);
         const uint32_t bracket_n = s_pico_lines_bracket_interval.exchange(0, std::memory_order_relaxed);
@@ -303,9 +337,9 @@ void pico_uart_status_task(void *arg) {
             if (bytes_n > 0u) {
                 ESP_LOGW(TAG_PICO,
                          "status: NO_FRAMED_LINES (got %u raw bytes/s, no LF-terminated line yet) | UART%d tx=%d rx=%d baud=%d | "
-                         "pending_rx=%u | gr=%u kb=%u dbg=%u unk=%u — check TX/RX not swapped; Pico sends '\\n'",
+                         "pending_rx=%u | gr=%u kb=%u sc=%u dbg=%u unk=%u — check TX/RX not swapped; Pico sends '\\n'",
                          (unsigned) bytes_n, uart_num, tx_pin, rx_pin, baud, (unsigned) pending_rx, (unsigned) gr_n,
-                         (unsigned) kb_n, (unsigned) bracket_n, (unsigned) unk_n);
+                         (unsigned) kb_n, (unsigned) sc_n, (unsigned) bracket_n, (unsigned) unk_n);
             } else {
                 ESP_LOGD(TAG_PICO,
                          "status: NO_DATA_YET | UART%d tx=%d rx=%d baud=%d | pending_rx=%u — idle RX "
@@ -314,14 +348,14 @@ void pico_uart_status_task(void *arg) {
             }
         } else if (!link_ok) {
             ESP_LOGW(TAG_PICO,
-                     "status: STALE (%lums since last line) | UART%d | pending_rx=%u | last 1s: bytes=%u gr=%u kb=%u dbg=%u unk=%u",
+                     "status: STALE (%lums since last line) | UART%d | pending_rx=%u | last 1s: bytes=%u gr=%u kb=%u sc=%u dbg=%u unk=%u",
                      (unsigned long) ago_ms, uart_num, (unsigned) pending_rx, (unsigned) bytes_n, (unsigned) gr_n,
-                     (unsigned) kb_n, (unsigned) bracket_n, (unsigned) unk_n);
+                     (unsigned) kb_n, (unsigned) sc_n, (unsigned) bracket_n, (unsigned) unk_n);
         } else {
             ESP_LOGD(TAG_PICO,
-                     "status: OK (last line %lums ago) | UART%d | pending_rx=%u | last 1s: bytes=%u gr=%u kb=%u dbg=%u unk=%u",
+                     "status: OK (last line %lums ago) | UART%d | pending_rx=%u | last 1s: bytes=%u gr=%u kb=%u sc=%u dbg=%u unk=%u",
                      (unsigned long) ago_ms, uart_num, (unsigned) pending_rx, (unsigned) bytes_n, (unsigned) gr_n,
-                     (unsigned) kb_n, (unsigned) bracket_n, (unsigned) unk_n);
+                     (unsigned) kb_n, (unsigned) sc_n, (unsigned) bracket_n, (unsigned) unk_n);
         }
     }
 }

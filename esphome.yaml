@@ -112,7 +112,7 @@ duke3d:
   # Run `esphome compile` to regenerate `components/duke3d/pico_uart_bridge_maps.h`; rebuild Pico UF2 (no shared header with ESP).
   # Decode in firmware (main.c): hat uses YAML axis pair before byte [5] (skip leading report ID 01 when present).
   # Hat is decoded only when ABXY row is idle (b5 ^ 0x0F == 0) so face presses never emit bogus cross_*.
-  # Face byte [5]^0x0F; Z/C/LB/RB/start byte [6]. Star/dash/heart: action `none` — dash/heart are not decoded as inputs.
+  # Face byte [5]^0x0F; Z/C/LB/RB/start byte [6]. Star → Escape in-game; dash/heart: `none` — not decoded as inputs.
   pico_gamepad_map:
     cross_up: { report: "01 7F 7F 7F 00 0F 00 00", action: arrow_up }
     cross_down: { report: "01 7F 7F 7F FF 0F 00 00", action: arrow_down }
@@ -128,7 +128,7 @@ duke3d:
     start: { report: "01 7F 7F 7F 7F 0F 20 00", action: record_session }
     bumper_l: { report: "01 7F 7F 7F 7F 0F 04 00", action: strafe_mod }
     bumper_r: { report: "01 7F 7F 7F 7F 0F 08 00", action: open }
-    star: { report: "01 7F 7F 7F 7F 0F 00 00", action: none }
+    star: { report: "01 7F 7F 7F 7F 0F 00 00", action: escape }
     dash: { report: "01 7F 7F 7F 7F 0F 10 00", action: none }
     heart: { report: "01 7F 7F 7F 7F 0F 10 00", action: none }
 

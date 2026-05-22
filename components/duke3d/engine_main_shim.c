@@ -11,6 +11,9 @@
 #include "dukesp_hooks.h"
 #include "duke_reload.h"
 
+extern void Shutdown(void);
+extern void uninitgroupfile(void);
+
 extern int main(int argc, char **argv);
 
 static jmp_buf duke_reload_jbuf;
@@ -25,6 +28,9 @@ int duke3d_main(int argc, char **argv)
     if (setjmp(duke_reload_jbuf) != 0) {
         int reason = duke_jump_reason;
         duke_reload_armed = 0;
+        /* longjmp skips normal game teardown — free heap or next duke3d_main() OOMs loading GRP. */
+        Shutdown();
+        uninitgroupfile();
         return reason;
     }
 

@@ -83,7 +83,7 @@ DEFAULT_GAMEPAD_ACTIONS = {
     "start": "record_session",
     "bumper_l": "strafe_mod",
     "bumper_r": "open",
-    "star": "none",
+    "star": "escape",
     "dash": "none",
     "heart": "none",
 }

@@ -7,7 +7,7 @@
 #include <stdint.h>
 #include <string.h>
 
-/* When start.action is record_session: warm-restart random map on ESP + drop HID Escape (pads leak Start as ESC). */
+/* When start.action is record_session: drop HID Escape from real keyboards (pads leak Start as ESC). */
 #define PICO_UART_BRIDGE_DROP_HID_KEYBOARD_ESCAPE (1u)
 
 #define PICO_UART_BRIDGE_HID_KEYBOARD_ESCAPE (0x29u)
