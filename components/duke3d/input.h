@@ -46,5 +46,5 @@ void input_set_state(const GamepadState &state);
 // Start Pico UART keyboard bridge task.
 void input_start_pico_uart_bridge(int uart_num, int tx_pin, int rx_pin, int baud_rate);
 
-/** True after one decoded start-button press when YAML maps start → record_session (`pico_uart_bridge_maps.h`). */
+/** True once after Pico Start (`play_live` or legacy record_session): `game_task` reloads engine into playable E1L1. See `esp32_hal.cpp`. */
 bool input_take_pico_uart_start_press(void);

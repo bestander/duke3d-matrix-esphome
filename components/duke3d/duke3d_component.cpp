@@ -283,31 +283,40 @@ void Duke3DComponent::game_task(void* arg) {
 
     static char demo_arg[40];
 
+    // Shareware (VOLUMEONE) episode 1 has 6 maps, E1L1..E1L6 — the new-game menu wraps
+    // volume 0 at level >5 (menues.c). Registered would be 7; this device runs the shareware GRP.
+    // We can't query VOLUMEONE here (GRP CRC is only known after duke3d_main opens it), so the
+    // count is fixed to the shareware set. Bump to 7 if a registered GRP is ever shipped.
+    static constexpr int kEp1LevelCount = 6;
+    static char level_arg[8];  // "/l<N>" chosen per Start press; referenced by argv_live below
+
     char* argv_demo[8];
-    char* argv_record[] = {
+    /* Pick up / warp (no Logo): Episode 1, random level, easiest skill. /s parse is atol()%5 with
+     * NO -1 (game.c case 's'), so /s0 = Piece of Cake (easiest); /s1 would be Let's Rock. No demo. */
+    char* argv_live[] = {
         (char*) "duke3d",
         (char*) "-game_dir",
         (char*) "/sdcard/duke3d",
         (char*) "/nm",
-        (char*) "/r",
-        (char*) "/s0",
         (char*) "/v1",
-        (char*) "/l1",
-        (char*) "/er",
+        level_arg,
+        (char*) "/s0",
         nullptr,
     };
 
-    bool kiosk_record_boot = false;
+    bool run_live_next = false;
 
     for (;;) {
         int argc_run;
         char** argv_run;
 
-        if (kiosk_record_boot) {
-            kiosk_record_boot = false;
-            argc_run = 9;
-            argv_run = argv_record;
-            ESP_LOGI(TAG, "Kiosk: live play easy E1L1 with demo recording (/r, /er)");
+        if (run_live_next) {
+            run_live_next = false;
+            const int level = 1 + (int) (esp_random() % (uint32_t) kEp1LevelCount);
+            snprintf(level_arg, sizeof(level_arg), "/l%d", level);
+            argc_run = 7;
+            argv_run = argv_live;
+            ESP_LOGI(TAG, "Live play: warp E1 random level easiest (/v1 %s /s0)", level_arg);
         } else {
             if (!pick_random_demo_dmo(game_dir, self->current_demo_, sizeof(self->current_demo_))) {
                 strncpy(self->current_demo_, "DEMO1.DMO", sizeof(self->current_demo_) - 1);
@@ -346,15 +355,21 @@ void Duke3DComponent::game_task(void* arg) {
 
         tilecache_close();
 
-        if (rc == DUKE_EXIT_START_RECORD_SESSION) {
-            kiosk_record_boot = true;
-            ESP_LOGI(TAG, "Start record UART — reloading engine into kiosk recording");
+        if (rc == DUKE_EXIT_START_PLAY_E1L1) {
+            run_live_next = true;
+            ESP_LOGI(TAG, "Start — next engine run is live E1 random level (easiest)");
             continue;
         }
         if (rc == DUKE_EXIT_RECORDING_SESSION_DONE) {
-            ESP_LOGI(TAG, "Demo recording finalized (/er) — resuming random demo playback");
+            ESP_LOGI(TAG, "Recording session done (/er) — resuming random demo");
             continue;
         }
+        if (rc == 0) {
+            ESP_LOGI(TAG, "Duke exited normally — resuming random demo kiosk");
+            continue;
+        }
+
+        ESP_LOGW(TAG, "Duke returned %d — leaving game_task loop", rc);
         break;
     }
 

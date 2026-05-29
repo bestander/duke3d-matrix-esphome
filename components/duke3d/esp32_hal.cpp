@@ -51,9 +51,9 @@ void spi_lcd_clear() {}  // no-op: clearing is done implicitly by swap_buffers
 
 void spi_lcd_send_boarder(uint16_t *scr, int /*border*/) {
 #if PICO_UART_BRIDGE_DROP_HID_KEYBOARD_ESCAPE
-    /* Poll before Hub75 pointer check — avoids missing presses during splash / transient global_hub75=null. */
+    /* Start(play_live): poll latch here before Hub75 guard — avoids missing presses during splash. */
     if (input_take_pico_uart_start_press()) {
-        duke_jump_out_with_reason(DUKE_EXIT_START_RECORD_SESSION);
+        duke_jump_out_with_reason(DUKE_EXIT_START_PLAY_E1L1);
     }
 #endif
 

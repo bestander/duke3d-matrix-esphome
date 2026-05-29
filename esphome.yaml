@@ -124,8 +124,8 @@ duke3d:
     x: { report: "01 7F 7F 7F 7F 8F 00 00", action: inventory }
     y: { report: "01 7F 7F 7F 7F 1F 00 00", action: inventory_next }
     z: { report: "01 7F 7F 7F 7F 0F 01 00", action: jump }
-    # Start: ESP decodes `GR,...`; kiosk uses latch polled from render path when maps.h DROP_HID_KEYBOARD_ESCAPE=1 (record_session).
-    start: { report: "01 7F 7F 7F 7F 0F 20 00", action: record_session }
+    # Start: latch polled during blit (`pico_uart_bridge_maps.h`: DROP_HID_KEYBOARD_ESCAPE); next duke run is live E1L1 easiest (/s0 = Piece of Cake; /s parse is atol()%5, no -1), then demo again on quit.
+    start: { report: "01 7F 7F 7F 7F 0F 20 00", action: play_live }
     bumper_l: { report: "01 7F 7F 7F 7F 0F 04 00", action: strafe_mod }
     bumper_r: { report: "01 7F 7F 7F 7F 0F 08 00", action: open }
     star: { report: "01 7F 7F 7F 7F 0F 00 00", action: escape }

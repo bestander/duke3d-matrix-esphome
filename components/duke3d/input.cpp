@@ -58,7 +58,7 @@ static uint16_t s_vendor_btn_prev = 0;
 static void pico_uart_note_start_press_uart(const char *via) {
     ESP_LOGI(TAG_PICO, "start (%s)", via);
 #if PICO_UART_BRIDGE_DROP_HID_KEYBOARD_ESCAPE
-    /* Same YAML rule as record_session / ESC drop — avoids relying on a separate codegen -D that may miss TU flags. */
+    /* When start.action is play_live maps.h enables this block (PAD Start may appear as HID ESC). */
     s_pico_uart_start_press_requested.store(true, std::memory_order_release);
 #endif
 }

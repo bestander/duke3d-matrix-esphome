@@ -62,9 +62,14 @@ DUKE_SCAN_BY_ACTION = {
     "inventory": 0x1C,    # Enter
     "inventory_next": 0x1B,  # ]
     "escape": 0x01,
-    # Start decoded on ESP from GR snapshots; ESP maps record_session vs escape (no Duke bytes on Pico).
+    # Start decoded from GR on ESP — `game_task` runs live E1L1 warp; no Duke KB bytes from Pico for Start.
+    "play_live": None,
+    # Deprecated synonym for play_live on pico_gamepad_map.start only (YAML compatibility).
     "record_session": None,
 }
+
+# Enables DROP_HID_ESC + Start latch polling (pads often emit Start as HID Escape).
+PICO_UART_START_SPECIAL_ACTIONS = frozenset({"play_live", "record_session"})
 
 DUKE_GAMEPAD_ACTIONS_LIST = tuple(DUKE_SCAN_BY_ACTION.keys())
 
@@ -80,7 +85,7 @@ DEFAULT_GAMEPAD_ACTIONS = {
     "x": "inventory",
     "y": "inventory_next",
     "z": "jump",
-    "start": "record_session",
+    "start": "play_live",
     "bumper_l": "strafe_mod",
     "bumper_r": "open",
     "star": "escape",
@@ -120,8 +125,8 @@ def _normalize_gamepad_map(value):
             raise cv.Invalid(f"pico_gamepad_map.{key}: invalid action '{action}'")
         out[key] = {CONF_REPORT: report, CONF_ACTION: action}
     for key in PICO_GAMEPAD_MAP_KEYS:
-        if out[key][CONF_ACTION] == "record_session" and key != "start":
-            raise cv.Invalid("action 'record_session' is only valid for pico_gamepad_map.start")
+        if out[key][CONF_ACTION] in PICO_UART_START_SPECIAL_ACTIONS and key != "start":
+            raise cv.Invalid("actions 'play_live' and 'record_session' are only valid for pico_gamepad_map.start")
     return out
 
 
@@ -166,9 +171,9 @@ def _write_pico_uart_bridge_maps_header(normalized_map):
         "#include <string.h>",
         "",
     ]
-    drop_esc = normalized_map["start"][CONF_ACTION] == "record_session"
+    drop_esc = normalized_map["start"][CONF_ACTION] in PICO_UART_START_SPECIAL_ACTIONS
     lines.append(
-        "/* When start.action is record_session: drop HID Escape from real keyboards (pads leak Start as ESC). */"
+        "/* When start.action is play_live (or legacy record_session): drop HID ESC (pads leak Start as ESC). */"
     )
     lines.append(f"#define PICO_UART_BRIDGE_DROP_HID_KEYBOARD_ESCAPE ({1 if drop_esc else 0}u)")
     lines.append("")
@@ -183,7 +188,7 @@ def _write_pico_uart_bridge_maps_header(normalized_map):
     lines.append("        return -1;")
     for key in PICO_GAMEPAD_MAP_KEYS:
         action = normalized_map[key][CONF_ACTION]
-        if action in ("record_session", "none") or DUKE_SCAN_BY_ACTION[action] in (None, 0):
+        if action in ("record_session", "play_live", "none") or DUKE_SCAN_BY_ACTION[action] in (None, 0):
             lines.append(f'    if (!strcmp(n, "{key}"))')
             lines.append("        return -1;")
             continue
