@@ -19,6 +19,7 @@ public:
     float get_setup_priority() const override { return setup_priority::LATE; }
 
     void set_smoke_test(bool v)  { smoke_test_  = v; }
+    void set_record_demos(bool v) { record_demos_ = v; }
     void set_tile_cache(bool v)  { tile_cache_  = v; }
     void set_pause_wifi(bool v) { pause_wifi_ = v; }
     void set_wifi_bootstrap_grace_s(uint32_t v) { wifi_bootstrap_grace_s_ = v; }
@@ -45,6 +46,7 @@ private:
     EventGroupHandle_t sync_events_{};
     char current_demo_[32] = "DEMO1.DMO";
     bool smoke_test_    = false;
+    bool record_demos_ = true;
     bool tile_cache_    = true;
     bool pause_wifi_ = false;
     uint32_t wifi_bootstrap_grace_s_ = 12;

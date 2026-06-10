@@ -19,3 +19,6 @@ extern "C" void platform_audio_write(const int16_t* pcm, int n);
 
 // Output gain before I2S: percent of full scale (0 = mute, 100 = unity). Set from ESPHome duke3d config.
 extern "C" void platform_set_audio_output_percent(unsigned percent);
+
+// Drain the I2S DMA ring with silence before stopping the audio pump task.
+extern "C" void platform_audio_silence(void);

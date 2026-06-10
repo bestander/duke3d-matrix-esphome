@@ -25,6 +25,7 @@ CONF_PICO_UART_BAUD_RATE     = "pico_uart_baud_rate"
 CONF_PICO_GAMEPAD_MAP        = "pico_gamepad_map"
 CONF_REPORT                  = "report"
 CONF_ACTION                  = "action"
+CONF_RECORD_DEMOS            = "record_demos"
 
 # Logical gamepad controls (matches Pico decode bits in main.c).
 PICO_GAMEPAD_MAP_KEYS = (
@@ -216,6 +217,7 @@ CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(Duke3DClass),
         cv.Optional(CONF_SMOKE_TEST, default=False): cv.boolean,
+        cv.Optional(CONF_RECORD_DEMOS, default=True): cv.boolean,
         cv.Optional(CONF_TILE_CACHE, default=True): cv.boolean,
         cv.Optional(CONF_FLASH_TILES, default=False): cv.boolean,
         cv.Optional(CONF_PAUSE_WIFI, default=False): cv.boolean,
@@ -237,6 +239,7 @@ CONFIG_SCHEMA = cv.Schema(
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     cg.add(var.set_smoke_test(config[CONF_SMOKE_TEST]))
+    cg.add(var.set_record_demos(config[CONF_RECORD_DEMOS]))
     cg.add(var.set_tile_cache(config[CONF_TILE_CACHE]))
     if config[CONF_FLASH_TILES]:
         cg.add_define("DUKE3D_FLASH_TILES")

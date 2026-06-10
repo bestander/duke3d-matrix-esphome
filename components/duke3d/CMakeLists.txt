@@ -38,6 +38,7 @@ idf_component_register(
         "tilecache.cpp"
         "input.cpp"
         "flash_tiles.cpp"
+        "demo_recorder.cpp"
         "engine_main_shim.c"
         "audiolib_stubs.c"
         "pico_uart_vendor_hid_decode.c"

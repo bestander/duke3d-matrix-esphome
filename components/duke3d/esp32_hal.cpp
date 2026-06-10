@@ -178,6 +178,12 @@ extern "C" void platform_set_audio_output_percent(unsigned percent) {
     g_audio_output_percent.store(percent, std::memory_order_relaxed);
 }
 
+extern "C" void platform_audio_silence(void) {
+    auto *audio = esphome::i2s_audio::global_i2s;
+    if (!audio) return;
+    audio->flush_silence();
+}
+
 extern "C" FILE* platform_open_file(const char* rel_path, const char* mode) {
     auto* sd = esphome::sd_card::global_sd_card;
     if (!sd || !sd->is_mounted()) return nullptr;

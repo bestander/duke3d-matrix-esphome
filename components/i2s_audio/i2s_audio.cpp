@@ -80,5 +80,17 @@ void I2SAudio::write_pcm(const int16_t* buf, size_t num_bytes) {
     }
 }
 
+void I2SAudio::flush_silence() {
+    if (!initialized_) return;
+    /* One DMA slot = dma_buf_len samples/channel × 2 ch × 16-bit. */
+    constexpr size_t kSlotBytes = 512 * 2 * sizeof(int16_t);
+    uint8_t silence[kSlotBytes] = {};
+    /* dma_buf_count slots plus headroom for in-flight mixer output. */
+    for (int i = 0; i < 14; i++) {
+        size_t n = 0;
+        i2s_write(I2S_NUM_0, silence, sizeof(silence), &n, pdMS_TO_TICKS(50));
+    }
+}
+
 }  // namespace i2s_audio
 }  // namespace esphome

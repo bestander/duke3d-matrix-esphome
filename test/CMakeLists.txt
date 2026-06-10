@@ -9,17 +9,26 @@ add_executable(test_sd_card sd_card/test_grp_detection.cpp)
 
 add_executable(test_renderer
     renderer/test_downscaler.cpp
-    ${CMAKE_SOURCE_DIR}/../components/duke3d/renderer/renderer.cpp
+    ${CMAKE_SOURCE_DIR}/../components/duke3d/renderer.cpp
 )
 target_include_directories(test_renderer PRIVATE
     mock
-    ${CMAKE_SOURCE_DIR}/../components/duke3d/renderer
+    ${CMAKE_SOURCE_DIR}/../components/duke3d
 )
 target_compile_definitions(test_renderer PRIVATE DUKE3D_HOST_TEST)
 
 add_executable(test_input input/test_input_queue.cpp)
 
 add_executable(test_i2s_audio i2s_audio/test_write_pcm.cpp)
+
+add_executable(test_demo_recorder
+    duke3d/test_demo_recorder.cpp
+    ${CMAKE_SOURCE_DIR}/../components/duke3d/demo_recorder.cpp
+)
+target_include_directories(test_demo_recorder PRIVATE
+    ${CMAKE_SOURCE_DIR}/../components/duke3d
+)
+target_compile_definitions(test_demo_recorder PRIVATE DUKE3D_HOST_TEST)
 
 add_executable(test_hud
     hud/test_hud_layout.cpp

@@ -17,6 +17,7 @@
 #include "esp32_hal.h"
 #include "tilecache.h"
 #include "flash_tiles.h"
+#include "demo_recorder.h"
 #include "duke_reload.h"
 #include "input.h"
 #include <cstring>
@@ -301,6 +302,7 @@ void Duke3DComponent::game_task(void* arg) {
         (char*) "/v1",
         level_arg,
         (char*) "/s0",
+        (char*) "/r",
         nullptr,
     };
 
@@ -309,14 +311,17 @@ void Duke3DComponent::game_task(void* arg) {
     for (;;) {
         int argc_run;
         char** argv_run;
+        bool live_run = false;
 
         if (run_live_next) {
             run_live_next = false;
+            live_run = true;
             const int level = 1 + (int) (esp_random() % (uint32_t) kEp1LevelCount);
             snprintf(level_arg, sizeof(level_arg), "/l%d", level);
-            argc_run = 7;
+            argc_run = self->record_demos_ ? 8 : 7;
             argv_run = argv_live;
-            ESP_LOGI(TAG, "Live play: warp E1 random level easiest (/v1 %s /s0)", level_arg);
+            ESP_LOGI(TAG, "Live play: warp E1 random level easiest (/v1 %s /s0%s)",
+                     level_arg, self->record_demos_ ? " /r" : "");
         } else {
             if (!pick_random_demo_dmo(game_dir, self->current_demo_, sizeof(self->current_demo_))) {
                 strncpy(self->current_demo_, "DEMO1.DMO", sizeof(self->current_demo_) - 1);
@@ -351,13 +356,16 @@ void Duke3DComponent::game_task(void* arg) {
             }
         }
 
+        demo_recorder_arm(live_run && self->record_demos_);
         const int rc = duke3d_main(argc_run, argv_run);
+        demo_recorder_arm(0);
 
         tilecache_close();
 
         if (rc == DUKE_EXIT_START_PLAY_E1L1) {
             run_live_next = true;
-            ESP_LOGI(TAG, "Start — next engine run is live E1 random level (easiest)");
+            ESP_LOGI(TAG, "Start - next engine run is live E1 random level (easiest%s)",
+                     self->record_demos_ ? ", recording" : "");
             continue;
         }
         if (rc == DUKE_EXIT_RECORDING_SESSION_DONE) {

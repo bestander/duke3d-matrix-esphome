@@ -89,6 +89,8 @@ duke3d:
   # Wait for HA time sync before stopping WiFi at boot; otherwise clock stays 00:00 and sensors may not arrive.
   time_id: ha_time
   smoke_test: false
+  # Record Start-triggered live sessions to rotating /sdcard/duke3d/demo0.dmo ... demo9.dmo.
+  record_demos: true
   # tile_cache: pre-extracts ≤128px tiles from DUKE3D.GRP into TCACHE.BIN on SD (one-time build).
   # At runtime loadtile() reads that flat file instead of seeking inside GRP/ART — fewer SD hits,
   # less stutter. Extra PSRAM helps engine heaps (Initcache); this is separate I/O optimization.

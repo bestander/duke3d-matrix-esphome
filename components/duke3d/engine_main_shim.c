@@ -9,6 +9,7 @@
 #include <stdio.h>
 
 #include "SDL_video.h"
+#include "demo_recorder.h"
 #include "dukesp_hooks.h"
 #include "duke_reload.h"
 #include "esp_timer.h"
@@ -45,6 +46,8 @@ int duke3d_main(int argc, char **argv)
                (long long)shim_diag_ms(), reason);
         fflush(stdout);
         /* longjmp skips normal game teardown — free heap or next duke3d_main() OOMs loading GRP. */
+        /* If the live run was recording, finalize the .dmo before teardown. */
+        closedemowrite();
         SoundShutdown();
         Shutdown();
         printf("[duke3d_main] t=%lldms Shutdown() done\n", (long long)shim_diag_ms());
@@ -106,12 +109,17 @@ void dukesp_player_death_tick(int player_is_dead) {
     if (now - s_player_dead_since_ms >= DUKE_DEATH_RESTART_MS) {
         printf("[duke3d] player dead %d s — esp_restart()\n", DUKE_DEATH_RESTART_MS / 1000);
         fflush(stdout);
+        closedemowrite();
         esp_restart();
     }
 }
 
 void dukesp_set_kiosk_demo_record(int enabled) {
     s_kiosk_exit_after_demo_write = enabled ? 1 : 0;
+}
+
+int dukesp_demo_write_path(char *buf, size_t len) {
+    return demo_recorder_next_path(buf, len);
 }
 
 void dukesp_maybe_jump_after_demo_write_closed(void) {

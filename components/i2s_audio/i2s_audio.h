@@ -20,6 +20,9 @@ public:
     // Blocks until buffer is accepted by DMA.
     void write_pcm(const int16_t* buf, size_t num_bytes);
 
+    // Push silence through the DMA ring to avoid stale-sample screech on teardown.
+    void flush_silence();
+
 private:
     int bclk_ = -1, lrclk_ = -1, din_ = -1;
     bool initialized_ = false;

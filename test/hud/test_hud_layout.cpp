@@ -8,8 +8,12 @@ void test_hud_does_not_touch_game_rows() {
     m.fill({255, 0, 0});  // all red
 
     esphome::hud::Hud hud;
-    hud.set_temperature(22.5f);
-    hud.set_condition("sunny");
+    hud.set_time(20, 31);
+    hud.set_min_temp(18.0f);
+    hud.set_max_temp(22.0f);
+    hud.set_water_temp(19.0f);
+    hud.set_tide_high("08:15");
+    hud.set_tide_low("21:53");
     hud.render(m);
 
     // Rows 0–39 must remain untouched (all red)
@@ -25,8 +29,12 @@ void test_hud_draws_something_in_hud_rows() {
     m.fill({0, 0, 0});  // all black
 
     esphome::hud::Hud hud;
-    hud.set_temperature(22.5f);
-    hud.set_condition("sunny");
+    hud.set_time(20, 31);
+    hud.set_min_temp(18.0f);
+    hud.set_max_temp(22.0f);
+    hud.set_water_temp(19.0f);
+    hud.set_tide_high("08:15");
+    hud.set_tide_low("21:53");
     hud.render(m);
 
     // At least one non-black pixel must appear in rows 40–63
