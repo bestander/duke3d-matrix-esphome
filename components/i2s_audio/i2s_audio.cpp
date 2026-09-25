@@ -3,6 +3,11 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_system.h"
+#include "hal/gpio_ll.h"
+#include "soc/gpio_struct.h"
+#include "soc/i2s_struct.h"
+#include "soc/io_mux_reg.h"
 
 namespace esphome {
 namespace i2s_audio {
@@ -10,7 +15,40 @@ namespace i2s_audio {
 static const char* TAG = "i2s_audio";
 I2SAudio* global_i2s = nullptr;
 
+/* Pins held low across a software reset so a panic does not leave I2S clocks
+ * running into the MAX98357 (full-scale screech; digital volume does not apply). */
+static int s_quiet_pins[3] = {-1, -1, -1};
+
+static void quiet_amp_pins(void) {
+    I2S0.tx_conf.tx_start = 0;
+    for (int i = 0; i < 3; i++) {
+        int pin = s_quiet_pins[i];
+        if (pin < 0)
+            continue;
+        gpio_ll_hold_dis(&GPIO, (uint32_t)pin);
+        gpio_ll_func_sel(&GPIO, (uint8_t)pin, PIN_FUNC_GPIO);
+        gpio_ll_output_enable(&GPIO, (uint32_t)pin);
+        gpio_ll_set_level(&GPIO, (uint32_t)pin, 0);
+        gpio_ll_hold_en(&GPIO, (uint32_t)pin);
+    }
+}
+
+static void release_amp_pin_holds(void) {
+    for (int i = 0; i < 3; i++) {
+        int pin = s_quiet_pins[i];
+        if (pin < 0)
+            continue;
+        gpio_ll_hold_dis(&GPIO, (uint32_t)pin);
+    }
+}
+
 void I2SAudio::setup() {
+    s_quiet_pins[0] = bclk_;
+    s_quiet_pins[1] = lrclk_;
+    s_quiet_pins[2] = din_;
+    /* A previous panic may have frozen these pads low. Release before I2S claims them. */
+    release_amp_pin_holds();
+    esp_register_shutdown_handler(quiet_amp_pins);
     i2s_config_t cfg = {};
     cfg.mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX);
     cfg.sample_rate          = 11025;  // matches Multivoc MixRate

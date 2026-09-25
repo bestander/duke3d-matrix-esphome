@@ -164,6 +164,9 @@ wifi:
 captive_portal:
 
 api:
+  # No HA client on the bench. Default 15 min reboot would reset the board
+  # before the hourly crash can be captured.
+  reboot_timeout: 0s
   encryption:
     key: !secret api_encryption_key
 
