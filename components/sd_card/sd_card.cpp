@@ -2,8 +2,11 @@
 #include "sd_open_trace.h"
 #include "esphome/core/log.h"
 #include "driver/gpio.h"
+#include "esp_rom_sys.h"
 #include "esp_random.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "sdmmc_cmd.h"
 #include <algorithm>
 #include <cstring>
@@ -15,6 +18,31 @@ namespace sd_card {
 static const char* TAG = "sd_card";
 const char* SdCard::MOUNT_POINT = "/sdcard";
 SdCard* global_sd_card = nullptr;
+
+/* CMD8 returns 0x108 after a software reset when the card is still clocking
+ * out a previous block. 80 clocks with CS high is the SD spec's SPI wake. */
+static void sd_spi_wake(int cs, int clk, int mosi, int miso) {
+    const gpio_num_t pins[] = {
+        static_cast<gpio_num_t>(cs),
+        static_cast<gpio_num_t>(clk),
+        static_cast<gpio_num_t>(mosi),
+        static_cast<gpio_num_t>(miso),
+    };
+    for (gpio_num_t pin : pins)
+        gpio_hold_dis(pin);
+
+    gpio_set_direction(static_cast<gpio_num_t>(cs), GPIO_MODE_OUTPUT);
+    gpio_set_direction(static_cast<gpio_num_t>(clk), GPIO_MODE_OUTPUT);
+    gpio_set_direction(static_cast<gpio_num_t>(mosi), GPIO_MODE_OUTPUT);
+    gpio_set_level(static_cast<gpio_num_t>(cs), 1);
+    gpio_set_level(static_cast<gpio_num_t>(mosi), 1);
+    for (int i = 0; i < 80; i++) {
+        gpio_set_level(static_cast<gpio_num_t>(clk), 0);
+        esp_rom_delay_us(2);
+        gpio_set_level(static_cast<gpio_num_t>(clk), 1);
+        esp_rom_delay_us(2);
+    }
+}
 
 void SdCard::setup() {
     sd_open_trace_set(open_trace_);
@@ -30,9 +58,11 @@ void SdCard::setup() {
     bus.quadhd_io_num = -1;
     bus.max_transfer_sz = 32768;  // larger DMA buffer reduces per-transaction overhead
 
+    sd_spi_wake(cs_, sck_, mosi_, miso_);
+
     esp_err_t ret = spi_bus_initialize(
         static_cast<spi_host_device_t>(host.slot), &bus, SDSPI_DEFAULT_DMA);
-    if (ret != ESP_OK) {
+    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
         ESP_LOGE(TAG, "SPI bus init failed: %s", esp_err_to_name(ret));
         mark_failed();
         return;
@@ -47,7 +77,22 @@ void SdCard::setup() {
     mnt.max_files = 16;  /* streaming audio opens up to 9 concurrent fds (8 voices + 1 grp_stream) */
     mnt.allocation_unit_size = 16 * 1024;
 
-    ret = esp_vfs_fat_sdspi_mount(MOUNT_POINT, &host, &dev, &mnt, &card_);
+    /* A software reset does not power-cycle the card. CMD8 often returns
+     * ESP_ERR_INVALID_RESPONSE (0x108) until the card leaves the previous
+     * command. Retry before giving up — Duke never starts if this fails. */
+    const int kMountTries = 5;
+    for (int attempt = 1; attempt <= kMountTries; attempt++) {
+        ret = esp_vfs_fat_sdspi_mount(MOUNT_POINT, &host, &dev, &mnt, &card_);
+        if (ret == ESP_OK)
+            break;
+        ESP_LOGW(TAG, "SD mount attempt %d/%d failed: %s", attempt, kMountTries, esp_err_to_name(ret));
+        if (attempt < kMountTries) {
+            spi_bus_free(static_cast<spi_host_device_t>(host.slot));
+            vTaskDelay(pdMS_TO_TICKS(200 * attempt));
+            sd_spi_wake(cs_, sck_, mosi_, miso_);
+            spi_bus_initialize(static_cast<spi_host_device_t>(host.slot), &bus, SDSPI_DEFAULT_DMA);
+        }
+    }
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "SD mount failed: %s", esp_err_to_name(ret));
         mark_failed();

@@ -20,6 +20,7 @@
 #include "demo_recorder.h"
 #include "duke_reload.h"
 #include "input.h"
+#include <cstdio>
 #include <cstring>
 #include <dirent.h>
 #include <strings.h>
@@ -83,6 +84,25 @@ bool pick_random_demo_dmo(const char* game_dir, char* out, size_t out_sz) {
 #endif
         if (!filename_is_dmo(ent->d_name))
             continue;
+        /* Header: int32 tick count, then one version byte. Reject recordings
+         * that never got a real header (the version-4 DEMO5.DMO case) so the
+         * engine is not launched only to fall into the menu. */
+        {
+            char path[80];
+            snprintf(path, sizeof(path), "%s/%s", game_dir, ent->d_name);
+            FILE* f = fopen(path, "rb");
+            unsigned char hdr[5] = {};
+            const size_t nread = f ? fread(hdr, 1, sizeof(hdr), f) : 0;
+            if (f)
+                fclose(f);
+            const unsigned ver = nread == sizeof(hdr) ? hdr[4] : 0;
+            const bool playable = ver == 27 || ver == 28 || ver == 29 || ver == 116 ||
+                                  ver == 117 || ver == 118 || ver == 119;
+            if (!playable) {
+                ESP_LOGW(TAG, "skip unplayable demo %s (version %u)", ent->d_name, ver);
+                continue;
+            }
+        }
         strncpy(names[n], ent->d_name, sizeof(names[0]) - 1);
         names[n][sizeof(names[0]) - 1] = '\0';
         n++;

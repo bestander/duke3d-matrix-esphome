@@ -18,6 +18,8 @@
 
 extern void Shutdown(void);
 extern void uninitgroupfile(void);
+extern void kclose(int32_t handle);
+extern int recfilep;
 
 extern int main(int argc, char **argv);
 
@@ -46,6 +48,13 @@ int duke3d_main(int argc, char **argv)
                (long long)shim_diag_ms(), reason);
         fflush(stdout);
         /* longjmp skips normal game teardown — free heap or next duke3d_main() OOMs loading GRP. */
+        /* Attract playback leaves recfilep open. longjmp skips playback()'s
+         * kclose, and the next live run fopen()s a .dmo on the same volume.
+         * FatFs deadlocks or faults if that read handle is still open. */
+        if (recfilep >= 0) {
+            kclose(recfilep);
+            recfilep = -1;
+        }
         /* If the live run was recording, finalize the .dmo before teardown. */
         closedemowrite();
         SoundShutdown();
