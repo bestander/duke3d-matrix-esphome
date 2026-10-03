@@ -12,6 +12,7 @@
 #include "demo_recorder.h"
 #include "dukesp_hooks.h"
 #include "duke_reload.h"
+#include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "esp_system.h"
 #include "funct.h"
@@ -20,6 +21,7 @@ extern void Shutdown(void);
 extern void uninitgroupfile(void);
 extern void kclose(int32_t handle);
 extern int recfilep;
+extern uint8_t which_demo;
 
 extern int main(int argc, char **argv);
 
@@ -30,6 +32,42 @@ static volatile int duke_jump_reason;
 static int64_t shim_diag_ms(void)
 {
     return (int64_t)(esp_timer_get_time() / 1000);
+}
+
+/* Free everything a run allocated, or the next duke3d_main() OOMs loading GRP. */
+static void duke_teardown_run(void)
+{
+    /* Attract playback leaves recfilep open. longjmp skips playback()'s
+     * kclose, and the next live run fopen()s a .dmo on the same volume.
+     * FatFs deadlocks or faults if that read handle is still open. */
+    if (recfilep >= 0) {
+        kclose(recfilep);
+        recfilep = -1;
+    }
+    /* If the live run was recording, finalize the .dmo before teardown. */
+    closedemowrite();
+    SoundShutdown();
+    Shutdown();
+    printf("[duke3d_main] t=%lldms Shutdown() done\n", (long long)shim_diag_ms());
+    fflush(stdout);
+    uninitgroupfile();
+    printf("[duke3d_main] t=%lldms uninitgroupfile() done, internal free=%u psram free=%u\n",
+           (long long)shim_diag_ms(),
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+           (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    fflush(stdout);
+
+    /* Engine reloads still leak and fragment a few KB per run. Reboot between
+     * demos before the next Startup() hits an allocation failure mid-init. */
+    const size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    const size_t psram_blk  = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+    const size_t int_free   = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (psram_free < 250 * 1024 || psram_blk < 96 * 1024 || int_free < 42 * 1024) {
+        printf("[duke3d_main] heap low (psram free=%u blk=%u internal=%u) — esp_restart()\n",
+               (unsigned)psram_free, (unsigned)psram_blk, (unsigned)int_free);
+        fflush(stdout);
+        esp_restart();
+    }
 }
 
 int duke3d_main(int argc, char **argv)
@@ -47,28 +85,16 @@ int duke3d_main(int argc, char **argv)
         printf("[duke3d_main] t=%lldms longjmp reason=%d — Shutdown()+uninitgroupfile()\n",
                (long long)shim_diag_ms(), reason);
         fflush(stdout);
-        /* longjmp skips normal game teardown — free heap or next duke3d_main() OOMs loading GRP. */
-        /* Attract playback leaves recfilep open. longjmp skips playback()'s
-         * kclose, and the next live run fopen()s a .dmo on the same volume.
-         * FatFs deadlocks or faults if that read handle is still open. */
-        if (recfilep >= 0) {
-            kclose(recfilep);
-            recfilep = -1;
-        }
-        /* If the live run was recording, finalize the .dmo before teardown. */
-        closedemowrite();
-        SoundShutdown();
-        Shutdown();
-        printf("[duke3d_main] t=%lldms Shutdown() done\n", (long long)shim_diag_ms());
-        fflush(stdout);
-        uninitgroupfile();
-        printf("[duke3d_main] t=%lldms uninitgroupfile() done\n", (long long)shim_diag_ms());
-        fflush(stdout);
+        duke_teardown_run();
         return reason;
     }
 
     int rc = main(argc, argv);
     duke_reload_armed = 0;
+    printf("[duke3d_main] t=%lldms main() returned %d — teardown\n",
+           (long long)shim_diag_ms(), rc);
+    fflush(stdout);
+    duke_teardown_run();
     return rc;
 }
 
@@ -95,6 +121,9 @@ static int64_t s_player_dead_since_ms;
 #define DUKE_DEATH_RESTART_MS 10000
 
 void dukesp_reset_for_new_engine_run(void) {
+    /* game.c globals keep their values across in-process engine restarts.
+     * playback() only honours /dFILE while which_demo == 1. */
+    which_demo = 1;
     s_kiosk_exit_after_demo_write = 0;
     s_player_dead_since_ms = 0;
 }
